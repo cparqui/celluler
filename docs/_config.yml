@@ -1,0 +1,32 @@
+title: Celluler Documentation
+description: Documentation for the Celluler decentralized AI agent ecosystem
+theme: jekyll-theme-minimal
+plugins:
+  - jekyll-relative-links
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# Navigation
+nav:
+  - Getting Started: getting-started.md
+  - Architecture: architecture.md
+  - Services: services.md
+  - Networking: networking.md
+  - AI Integration: ai.md
+  - API Reference: api.md
+  - Contributing: contributing.md
+
+# Site settings
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Build settings
+exclude:
+  - node_modules
+  - package.json
+  - package-lock.json
+  - .gitignore
+  - .git
+  - README.md 
