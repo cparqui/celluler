@@ -12,11 +12,12 @@ Celluler is designed as a distributed system where each node (cell) is both a se
    - Load balancing and fault tolerance
    - Metrics and monitoring
 
-2. **Distributed Data Protocol (DAT)**
-   - Distributed data storage
-   - Version control
+2. **Hypercore Protocol**
+   - Distributed append-only logs for message journals
+   - Cryptographic message history and verification
    - Peer-to-peer data sharing
-   - Data verification
+   - Data encryption and access control
+   - Identity verification through social interaction history
 
 3. **Consensus Algorithm (Hashgraph)**
    - Byzantine fault tolerance
@@ -26,110 +27,187 @@ Celluler is designed as a distributed system where each node (cell) is both a se
 
 ## Cell Architecture
 
-Each cell is a Moleculer microservices cluster with the following core services:
+### Cell Types
+
+1. **Human-Controlled Cells**
+   - Direct user interaction
+   - Manual message handling
+   - User-defined behavior
+   - Interface for human oversight
+
+2. **AI-Controlled Cells**
+   - Autonomous operation
+   - Machine learning models
+   - Automated decision making
+   - Continuous learning and adaptation
 
 ### Core Services
 
-1. **DataService**
-   - Manages distributed data storage and retrieval
-   - Handles data versioning and synchronization
-   - Provides data access abstraction layer
-   - Manages peer discovery for data sharing
-   - Currently implemented using DAT protocol
+1. **MessageService**
+   - Handles message routing and delivery
+   - Implements message protocol
+   - Manages Hypercore-based message journals
+   - Provides message verification and identity proofs
 
-2. **ConsensusService**
-   - Implements distributed consensus
-   - Manages event propagation
-   - Handles voting and state agreement
-   - Maintains global state
-   - Currently implemented using Hashgraph algorithm
+2. **MarketService**
+   - Manages market participation
+   - Handles token transactions
+   - Implements market rules
+   - Coordinates resource allocation
 
-3. **NetworkService**
-   - Manages P2P connections
-   - Handles message routing
-   - Implements network protocols
-   - Manages peer discovery
+3. **ResourceService**
+   - Manages compute resources
+   - Handles data storage
+   - Implements resource sharing
+   - Tracks resource utilization
 
-4. **ModelService**
-   - Runs AI model inference
-   - Manages model updates
-   - Handles model distribution
-   - Provides training feedback
-
-5. **StateService**
+4. **StateService**
    - Maintains local state
    - Syncs with global state
    - Handles state transitions
    - Manages state verification
 
-6. **MetricsService**
-   - Collects performance metrics
-   - Monitors service health
-   - Provides observability
-   - Handles logging
+5. **IdentityService**
+   - Manages cell identity verification
+   - Maintains trust networks
+   - Handles social interaction proofs
+   - Implements reputation systems
 
-### Service Communication
+## Messaging Protocol
 
-Services communicate using Moleculer's built-in mechanisms:
+### Message Structure
 
 ```typescript
-// Example service interaction
-this.broker.call("data.store", { key: "data1", data: payload });
-this.broker.emit("network.message", { type: "update", payload });
+interface Message {
+    timestamp: number;
+    sender: string;    // Cell ID
+    receiver: string;  // Cell ID
+    type: MessageType;
+    body: any;
+}
+
+enum MessageType {
+    CHAT = 'CHAT',     // Human-readable communication
+    TX = 'TX',         // Transactional data
+    POST = 'POST',     // Content shared to global dataset
+    QUERY = 'QUERY',   // Requests for data from global dataset
+    COMPUTE = 'COMPUTE' // Computation requests
+}
 ```
 
-## Network Architecture
+### Message Types
 
-### Cell-to-Cell Communication
+1. **CHAT Messages**
+   - Human-readable communication
+   - Natural language processing
+   - Context preservation
+   - Thread management
 
-Cells communicate through:
-1. DataService for data sharing (currently using DAT protocol)
-2. ConsensusService for state agreement (currently using Hashgraph)
-3. Direct P2P messaging
+2. **TX Messages**
+   - Token transfers
+   - Identity verification
+   - Access control
+   - Resource payment
 
-### Data Flow
+3. **POST Messages**
+   - Content shared to global dataset
+   - Subtypes:
+     ```typescript
+     enum PostType {
+         TEXT = 'TEXT',       // Text content (e.g., tweets)
+         REPOST = 'REPOST',   // Repost of existing content
+         LIKE = 'LIKE',       // Like of existing content
+         MEDIA = 'MEDIA',     // Images, videos, etc.
+         METADATA = 'METADATA' // Content metadata
+     }
+     ```
+   - Content verification
+   - Access control
+   - Version management
 
-1. **Data Storage**
-   ```
-   Cell A -> DataService -> Distributed Network -> Cell B
-   ```
+4. **QUERY Messages**
+   - Requests for data from global dataset
+   - Filtering and search
+   - Access control
+   - Result pagination
 
-2. **Consensus**
-   ```
-   Cell A -> ConsensusService -> Gossip Protocol -> Cell B
-   ```
+5. **COMPUTE Messages**
+   - Computation requests
+   - Resource allocation
+   - Result delivery
+   - Cost tracking
 
-3. **Model Updates**
-   ```
-   Cell A -> ModelService -> NetworkService -> Cell B
-   ```
+## Market Architecture
+
+### Market Types
+
+1. **Global Market (PRANA)**
+   - Universal participation
+   - Common token balance
+   - Base currency for all transactions
+   - Global state consensus
+
+2. **Resource Markets**
+   - Compute resource trading
+   - Data storage trading
+   - Resource allocation
+   - Price discovery
+
+3. **Specialized Markets**
+   - AI model training
+   - Data sharing
+   - Service provision
+   - Custom applications
+
+### Market Mechanics
+
+1. **Cooperative Games**
+   - Trust-based interactions
+   - Resource pooling
+   - Profit sharing
+   - Reputation systems
+
+2. **Resource Allocation**
+   - Dynamic pricing
+   - Load balancing
+   - Quality of service
+   - Fair distribution
+
+3. **Token Economics**
+   - PRANA as base currency
+   - Market-specific tokens
+   - Cross-market trading
+   - Value transfer
 
 ## Security Architecture
 
 ### Data Security
-- End-to-end encryption for all communications
-- Data verification through DAT's hash system
-- Access control through key management
+- End-to-end encryption
+- Message signing
+- Access control
+- Data verification
 
-### Network Security
-- Byzantine fault tolerance through Hashgraph
-- Secure peer discovery
-- Message authentication
-- State verification
+### Market Security
+- Byzantine fault tolerance
+- Fair ordering
+- Transaction verification
+- State consistency
 
 ## Scalability
 
 The system is designed to scale through:
 
 1. **Horizontal Scaling**
-   - Multiple cells can join the network
-   - Services can be distributed across machines
-   - Load balancing through Moleculer
+   - Multiple cells
+   - Distributed markets
+   - Resource sharing
+   - Load balancing
 
 2. **Vertical Scaling**
-   - Services can be scaled independently
-   - Resource-intensive services can be distributed
-   - Caching and optimization at service level
+   - Resource optimization
+   - Performance tuning
+   - Caching strategies
+   - State management
 
 ## Deployment Options
 
@@ -140,7 +218,7 @@ Cells can be deployed in various configurations:
    - Good for development and testing
 
 2. **Cluster**
-   - Services distributed across multiple machines
+   - Services distributed across machines
    - Better for production workloads
 
 3. **Hybrid**

@@ -10,6 +10,8 @@ Welcome to the Celluler documentation! This is your starting point for understan
 - [P2P Networking](networking.md)
 - [AI Integration](ai.md)
 - [API Reference](api.md)
+- [Market Architecture](markets.md)
+- [Identity Verification](identity.md)
 
 ## What is Celluler?
 
@@ -22,6 +24,8 @@ Celluler is a decentralized AI agent ecosystem built on peer-to-peer protocols, 
 - **Consensus**: Maintain global state through distributed consensus
 - **Data Distribution**: Share and version data across the network
 - **Service Architecture**: Modular, scalable service design
+- **Identity Verification**: Social interaction-based identity verification
+- **Market System**: Cooperative resource sharing and trading
 
 ## Documentation Structure
 
@@ -35,18 +39,24 @@ Celluler is a decentralized AI agent ecosystem built on peer-to-peer protocols, 
 - Service architecture
 - Network topology
 - Security model
+- Identity verification
+- Market system
 
 ### 3. Development
 - Service development
 - Network programming
 - AI integration
 - Testing and deployment
+- Identity system implementation
+- Market integration
 
 ### 4. API Reference
 - Service APIs
 - Network protocols
 - Data structures
 - Error handling
+- Identity verification endpoints
+- Market operations
 
 ## Contributing
 

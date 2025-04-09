@@ -237,6 +237,124 @@ interface TrainingUpdateEvent {
 }
 ```
 
+### IdentityService
+
+#### Actions
+
+##### `identity.verify`
+Verify a cell's identity through social interaction history.
+
+```typescript
+interface VerifyParams {
+    cellId: string;
+    proof: {
+        messages: Message[];
+        timestamp: number;
+    };
+}
+
+interface VerifyResponse {
+    verified: boolean;
+    confidence: number;
+    validMessages: Message[];
+    timestamp: number;
+}
+```
+
+##### `identity.getProof`
+Generate an identity proof for verification.
+
+```typescript
+interface GetProofParams {
+    verifierId: string;
+    count?: number;
+}
+
+interface GetProofResponse {
+    cellId: string;
+    proofMessages: Message[];
+    timestamp: number;
+}
+```
+
+##### `identity.updateTrust`
+Update trust score for a cell.
+
+```typescript
+interface UpdateTrustParams {
+    cellId: string;
+    verification: VerificationResult;
+}
+
+interface UpdateTrustResponse {
+    newScore: number;
+    timestamp: number;
+}
+```
+
+#### Events
+
+##### `identity.verified`
+Emitted when a cell's identity is verified.
+
+```typescript
+interface IdentityVerifiedEvent {
+    cellId: string;
+    verifierId: string;
+    confidence: number;
+    timestamp: number;
+}
+```
+
+### MessageService
+
+#### Actions
+
+##### `message.send`
+Send a message to another cell.
+
+```typescript
+interface SendParams {
+    receiver: string;
+    type: MessageType;
+    body: any;
+}
+
+interface SendResponse {
+    messageId: string;
+    timestamp: number;
+}
+```
+
+##### `message.getJournal`
+Retrieve message journal entries.
+
+```typescript
+interface GetJournalParams {
+    cellId?: string;
+    startTime?: number;
+    endTime?: number;
+    limit?: number;
+}
+
+interface GetJournalResponse {
+    messages: Message[];
+    total: number;
+}
+```
+
+#### Events
+
+##### `message.received`
+Emitted when a message is received.
+
+```typescript
+interface MessageReceivedEvent {
+    message: Message;
+    timestamp: number;
+}
+```
+
 ## Common Types
 
 ### PeerInfo
@@ -274,6 +392,38 @@ interface TrainingConfig {
     optimizer: string;
     lossFunction: string;
     metrics: string[];
+}
+```
+
+### Message
+
+```typescript
+interface Message {
+    id: string;
+    timestamp: number;
+    sender: string;
+    receiver: string;
+    type: MessageType;
+    body: any;
+    signature: string;
+}
+
+enum MessageType {
+    CHAT = 'CHAT',
+    TX = 'TX',
+    DATA = 'DATA',
+    COMPUTE = 'COMPUTE'
+}
+```
+
+### VerificationResult
+
+```typescript
+interface VerificationResult {
+    verified: boolean;
+    confidence: number;
+    validMessages: Message[];
+    timestamp: number;
 }
 ```
 
