@@ -10,9 +10,10 @@ Each service follows these style guidelines:
 
 1. **File Organization**
    - One service per file
-   - File name is snake_case version of camelCase service name
+   - File name is snake_case version of camelCase service name with .service.js suffix
    - Located in `src/services` directory
-   - Example: `example_service.js` for `ExampleService`
+   - Test files use .service.test.js suffix
+   - Example: `example.service.js` for `ExampleService` and `example.service.test.js` for its tests
 
 2. **Service Definition**
    - Service constructor accepts settings with default value
@@ -43,7 +44,7 @@ Each service follows these style guidelines:
 Example service structure:
 
 ```javascript
-// src/services/example_service.js
+// src/services/example.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -148,7 +149,7 @@ export default class ExampleService extends Service {
 Manages cell configuration and coordinates service interactions:
 
 ```javascript
-// src/services/nucleus_service.js
+// src/services/nucleus.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -272,7 +273,7 @@ export default class NucleusService extends Service {
 Handles message routing, delivery, and verification:
 
 ```javascript
-// src/services/message_service.js
+// src/services/message.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -383,7 +384,7 @@ export default class MessageService extends Service {
 Manages local and global state synchronization:
 
 ```javascript
-// src/services/state_service.js
+// src/services/state.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -471,7 +472,7 @@ export default class StateService extends Service {
 Manages cell identity and trust networks:
 
 ```javascript
-// src/services/identity_service.js
+// src/services/identity.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -561,7 +562,7 @@ export default class IdentityService extends Service {
 Manages Hashgraph consensus and event propagation:
 
 ```javascript
-// src/services/consensus_service.js
+// src/services/consensus.service.js
 
 import { Service } from "moleculer";
 import _ from "lodash";
@@ -711,11 +712,11 @@ if (!data) {
 
 ```javascript
 import { ServiceBroker } from "moleculer";
-import ExampleService from "./example.service";
+import ExampleService from "./example.service.js";
 
 describe("Example Service", () => {
     let broker = new ServiceBroker();
-    let service = broker.createService(ExampleService);
+    let service = new ExampleService(broker);
 
     beforeAll(() => broker.start());
     afterAll(() => broker.stop());
@@ -731,6 +732,12 @@ describe("Example Service", () => {
 
 ```javascript
 describe("Service Integration", () => {
+    let broker = new ServiceBroker();
+    let service = new ExampleService(broker);
+
+    beforeAll(() => broker.start());
+    afterAll(() => broker.stop());
+
     it("should work with other services", async () => {
         const result = await broker.call("example.action", {
             dependency: "other-service"

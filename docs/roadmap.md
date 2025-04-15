@@ -1,256 +1,199 @@
-# Implementation Roadmap
+# Celluler MVP Roadmap
 
-## Phase 1: MVP - Social Network with Basic Market (Q2 2024)
+## Phase 1: Core Infrastructure (Current)
 
-### Core Components
+### 1. Core Services
+- [x] NucleusService
+  - [x] Basic service structure
+  - [x] Hypercore journal management
+  - [x] Core binding and discovery
+  - [x] Service lifecycle management
+  - [x] Unit tests
+  - [x] Logging and error handling
+  - [ ] Integration tests with other services
 
-1. **Basic Cell Implementation**
-   - Human-controlled cells only
-   - Simple message handling
-   - Basic identity verification
-   - Local message journal using Hypercore
+### 2. Basic CLI Tool
+- [x] Create basic CLI tool structure
+- [x] Create basic cell startup script
+- [ ] Add configuration file support
+- [ ] Add environment variable support
+- [ ] Add logging configuration
 
-2. **Message Types**
-   ```typescript
-   enum MessageType {
-       CHAT = 'CHAT',     // Direct messages between cells
-       TX = 'TX',         // PRANA transactions
-       POST = 'POST',     // Content shared to global dataset
-       QUERY = 'QUERY',   // Requests for data from global dataset
-       COMPUTE = 'COMPUTE' // Computation requests
-   }
+### 3. Testing Framework
+- [x] Set up Jest testing framework
+- [x] Add unit tests for NucleusService
+- [ ] Add test coverage reporting
+- [ ] Add continuous integration
 
-   enum PostType {
-       TEXT = 'TEXT',     // Text content (e.g., tweets)
-       REPOST = 'REPOST', // Repost of existing content
-       LIKE = 'LIKE'      // Like of existing content
-   }
-   ```
+### 4. Basic API Gateway
+- [ ] Set up basic API server
+- [ ] Add health check endpoints
+- [ ] Add service status endpoints
+- [ ] Add basic authentication
+- [ ] Add API documentation
+- [ ] Add rate limiting
 
-3. **Global Dataset**
-   - Single shared dataset for all content
-   - Message limit: 280 characters for TEXT posts
-   - Basic content moderation
-   - Content persistence using Hypercore
-   - Query interface for retrieving content
+### 5. Documentation
+- [x] Add service development guidelines
+- [x] Document NucleusService architecture
+- [ ] Add getting started guide
+- [ ] Add configuration guide
 
-4. **PRANA Market**
-   - Simple token economics:
-     ```typescript
-     interface PranaRules {
-         baseIncome: number;      // Daily PRANA income per cell
-         postCost: number;        // Cost to post
-         repostCost: number;      // Cost to repost
-         likeCost: number;        // Cost to like
-         repostReward: number;    // Reward for being reposted
-         likeReward: number;      // Reward for being liked
-     }
-     ```
-   - Transaction tracking via Hashgraph
-   - Basic wallet functionality
+## Phase 2: Network Foundation
 
-### Testing Strategy
+### 1. Core Services (Continued)
+- [ ] MessageService
+  - [ ] Basic message routing and delivery
+  - [ ] Hypercore-based message journal
+  - [ ] Message verification
+  - [ ] Unit tests
+  - [ ] Integration tests
 
-1. **Network Simulation**
-   ```javascript
-   class NetworkSimulator {
-       constructor(cellCount) {
-           this.cells = Array(cellCount).fill().map(() => new Cell());
-           this.dataset = new GlobalDataset();
-       }
+- [ ] IdentityService
+  - [ ] Cell identity verification
+  - [ ] Trust network management
+  - [ ] Social interaction proofs
+  - [ ] Unit tests
+  - [ ] Integration tests
 
-       async simulateInteractions(duration) {
-           // Generate random interactions
-           const interactions = [
-               'post',
-               'repost',
-               'like',
-               'chat'
-           ];
+### 2. Cell-to-Cell Communication
+- [ ] Evaluate communication options:
+  - [ ] Socket.io
+  - [ ] WebSockets
+  - [ ] Hyperswarm peer connections (partially implemented)
+- [ ] Implement chosen protocol
+- [ ] Add secure connections
+- [ ] Implement message routing
+- [ ] Add connection management
 
-           for (let i = 0; i < duration; i++) {
-               const cell = this.cells[Math.floor(Math.random() * this.cells.length)];
-               const action = interactions[Math.floor(Math.random() * interactions.length)];
-               
-               switch(action) {
-                   case 'post':
-                       await cell.postToDataset(this.dataset, {
-                           type: 'TEXT',
-                           content: generateRandomText()
-                       });
-                       break;
-                   case 'repost':
-                       await cell.repostRandom(this.dataset);
-                       break;
-                   case 'like':
-                       await cell.likeRandom(this.dataset);
-                       break;
-                   case 'chat':
-                       await cell.sendRandomChat(this.cells);
-                       break;
-               }
-           }
-       }
-   }
-   ```
+### 3. Basic Security
+- [x] Basic Hypercore encryption
+- [ ] Implement cell authentication
+- [ ] Add key management
+- [ ] Implement access control
+- [ ] Add audit logging
 
-2. **Metrics to Track**
-   - Message propagation speed
-   - PRANA distribution
-   - Network participation
-   - Transaction finality time
+### 4. API Gateway (Continued)
+- [ ] Add message endpoints
+  - [ ] Send messages
+  - [ ] Receive messages
+  - [ ] Message status
+- [ ] Add identity endpoints
+  - [ ] Identity verification
+  - [ ] Trust management
+- [ ] Enhance authentication
+- [ ] Add API versioning
 
-## Phase 2: Market Development & Governance (Q3-Q4 2024)
+### 5. Monitoring
+- [x] Basic service logging
+- [x] Structured logging
+- [ ] Add service metrics
+- [ ] Add network metrics
+- [ ] Add log aggregation
 
-### Market Evolution
+## Phase 3: State and Consensus
 
-1. **Enhanced PRANA Economics**
-   - Dynamic pricing based on network activity
-   - Staking mechanisms
-   - Governance participation rewards
-   - Market-making incentives
+### 1. Core Services (Continued)
+- [ ] StateService
+  - [ ] Local state management
+  - [ ] Hashgraph consensus integration
+  - [ ] State verification
+  - [ ] Hypercore journal
+  - [ ] Unit tests
+  - [ ] Integration tests
 
-2. **Governance System**
-   - Proposal submission and voting
-   - Parameter adjustment mechanisms
-   - Treasury management
-   - Emergency response protocols
+- [ ] ConsensusService
+  - [ ] Hashgraph consensus algorithm
+  - [ ] Event propagation
+  - [ ] Event validation
+  - [ ] Consensus state management
+  - [ ] Unit tests
+  - [ ] Integration tests
 
-3. **User Onboarding**
-   - Simplified cell creation
-   - Web interface for interaction
-   - Mobile applications
-   - Documentation and tutorials
+### 2. Integration Testing
+- [ ] Add multi-cell test scenarios
+- [ ] Add network simulation
+- [ ] Add load testing
+- [ ] Add stress testing
 
-### Testing & Deployment
+### 3. Advanced Security
+- [ ] Implement end-to-end encryption
+- [ ] Add data integrity verification
+- [ ] Add secure key storage
+- [ ] Add secure communication channels
 
-1. **Closed Beta**
-   - Limited user group
-   - Feedback collection
-   - Bug fixing
-   - Performance optimization
+### 4. API Gateway (Continued)
+- [ ] Add state endpoints
+  - [ ] State queries
+  - [ ] State updates
+  - [ ] State history
+- [ ] Add consensus endpoints
+  - [ ] Event submission
+  - [ ] Consensus status
+  - [ ] Event history
+- [ ] Add advanced monitoring endpoints
+- [ ] Add performance metrics endpoints
 
-2. **Public Launch**
-   - Marketing campaign
-   - Community building
-   - Support infrastructure
-   - Monitoring systems
+## Phase 4: Deployment and Scaling
 
-## Phase 3: Cooperative Markets & Content Expansion (Q1-Q2 2025)
+### 1. Deployment Infrastructure
+- [ ] Add Docker support
+- [ ] Add Kubernetes support
+- [ ] Add configuration management
+- [ ] Add deployment automation
+- [ ] Add cluster management
+- [ ] Add load balancing
+- [ ] Add service discovery
+- [ ] Add health checks
 
-### Market Types
+### 2. Advanced Monitoring
+- [ ] Add security metrics
+- [ ] Add performance metrics
+- [ ] Add log analysis
+- [ ] Add alerting
+- [ ] Add request tracing
+- [ ] Add performance tracing
+- [ ] Add error tracing
 
-1. **Data Commons**
-   - Dataset sharing and verification
-   - Quality metrics
-   - Contribution rewards
-   - Access control
+### 3. Scaling Features
+- [ ] Add horizontal scaling support
+- [ ] Add vertical scaling support
+- [ ] Add resource optimization
+- [ ] Add performance tuning
 
-2. **Compute Commons**
-   - Resource pooling
-   - Task distribution
-   - Quality assurance
-   - Payment mechanisms
+## Phase 5: Market Features
 
-### Content Types
+### 1. Basic Market
+- [ ] Implement PRANA token
+- [ ] Add basic trading
+- [ ] Add resource allocation
+- [ ] Add price discovery
 
-1. **Media Support**
-   - Images
-   - Videos
-   - 3D models
-   - Virtual worlds
+### 2. Resource Markets
+- [ ] Add compute resource trading
+- [ ] Add storage trading
+- [ ] Add network trading
+- [ ] Add service trading
 
-2. **Specialized Channels**
-   - Task-specific channels
-   - Community channels
-   - Project channels
-   - Learning channels
+### 3. API Gateway (Final)
+- [ ] Add market endpoints
+  - [ ] Token management
+  - [ ] Trading operations
+  - [ ] Resource allocation
+  - [ ] Market status
+- [ ] Add advanced market features
+- [ ] Add market monitoring
 
-## Phase 4: AI Integration (Q3-Q4 2025)
+## Future Considerations
 
-### AI Cell Implementation
+### 1. Scalability
+- [ ] Research sharding
+- [ ] Research cross-chain compatibility
+- [ ] Research advanced AI model distribution
+- [ ] Research enhanced security features
 
-1. **Training Infrastructure**
-   - Dataset access
-   - Compute resource allocation
-   - Training pipeline
-   - Model versioning
-
-2. **Learning Mechanisms**
-   - Reinforcement learning from interactions
-   - Human feedback integration
-   - Continuous self-improvement
-   - Safety mechanisms
-
-3. **Governance & Ownership**
-   - Contributor tracking
-   - Reward distribution
-   - Model licensing
-   - Usage monitoring
-
-### Deployment Strategy
-
-1. **Gradual Integration**
-   - Limited AI cell deployment
-   - Human oversight
-   - Performance monitoring
-   - Safety checks
-
-2. **Network Effects**
-   - AI-human collaboration
-   - Knowledge sharing
-   - Collective learning
-   - Value creation
-
-## Technical Milestones
-
-### Phase 1
-- [ ] Basic cell implementation
-- [ ] Message protocol
-- [ ] Global dataset
-- [ ] PRANA market
-- [ ] Testing framework
-
-### Phase 2
-- [ ] Enhanced market mechanics
-- [ ] Governance system
-- [ ] User interfaces
-- [ ] Deployment infrastructure
-
-### Phase 3
-- [ ] Data commons
-- [ ] Compute commons
-- [ ] Media support
-- [ ] Channel specialization
-
-### Phase 4
-- [ ] AI training infrastructure
-- [ ] Learning mechanisms
-- [ ] Governance integration
-- [ ] Safety systems
-
-## Success Metrics
-
-### Phase 1
-- Message propagation < 1 second
-- Transaction finality < 5 seconds
-- 100% message delivery
-- Balanced PRANA distribution
-
-### Phase 2
-- 1000+ active cells
-- 80% governance participation
-- < 1% failed transactions
-- 24/7 system uptime
-
-### Phase 3
-- 10+ specialized channels
-- 1TB+ shared data
-- 1000+ compute hours
-- 50% resource utilization
-
-### Phase 4
-- 100+ AI cells
-- 90% human satisfaction
-- < 0.1% safety incidents
-- 10x efficiency improvement 
+### 2. Performance
+- [ ] Optimize consensus algorithm
+- [ ] Optimize data distribution
+- [ ] Optimize network communication
+- [ ] Optimize resource utilization 

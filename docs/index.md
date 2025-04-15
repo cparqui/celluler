@@ -7,6 +7,7 @@ Welcome to the Celluler documentation! This is your starting point for understan
 <!-- - [Getting Started](getting-started.md) -->
 - [Architecture Overview](architecture.md)
 - [Service Development](services.md)
+- [Development Roadmap](roadmap.md)
 
 <!-- - [P2P Networking](networking.md)
 - [AI Integration](ai.md)
