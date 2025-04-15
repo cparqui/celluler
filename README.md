@@ -66,13 +66,7 @@ Create a `config/default.json` file with your cell configuration:
 
 ## Documentation
 
-Detailed documentation is available in the `docs/` directory:
-
-- [Architecture Overview](docs/architecture.md)
-- [Service Development](docs/services.md)
-- [P2P Networking](docs/networking.md)
-- [AI Integration](docs/ai.md)
-- [API Reference](docs/api.md)
+View full project documentation at: [https://cparqui.github.io/celluler](https://cparqui.github.io/celluler)
 
 ## Contributing
 

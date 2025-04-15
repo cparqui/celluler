@@ -7,6 +7,7 @@ Welcome to the Celluler documentation! This is your starting point for understan
 <!-- - [Getting Started](getting-started.md) -->
 - [Architecture Overview](architecture.md)
 - [Service Development](services.md)
+
 <!-- - [P2P Networking](networking.md)
 - [AI Integration](ai.md)
 - [API Reference](api.md)
@@ -46,10 +47,9 @@ Celluler is a decentralized microservices platform built on peer-to-peer protoco
 We welcome contributions! Please see our [Contributing Guide](contributing.md) for details on how to get involved.
 
 ## Community
-
-- [GitHub Repository](https://github.com/yourusername/celluler)
-- [Issue Tracker](https://github.com/yourusername/celluler/issues)
-- [Discussions](https://github.com/yourusername/celluler/discussions)
+- [GitHub Repository](https://github.com/cparqui/celluler)
+- [Issue Tracker](https://github.com/cparqui/celluler/issues)
+- [Discussions](https://github.com/cparqui/celluler/discussions)
 
 ## License
 
