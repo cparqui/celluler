@@ -1,5 +1,8 @@
-const { ServiceBroker } = require('moleculer');
-const CellService = require('./services/CellService');
+#!/usr/bin/env node
+
+import { program } from 'commander';
+import { ServiceBroker } from 'moleculer';
+import NucleusService from './services/nucleus_service.js';
 
 async function startCell(id) {
     const broker = new ServiceBroker({
@@ -8,44 +11,39 @@ async function startCell(id) {
         logLevel: 'info'
     });
 
-    // Create and add cell service
-    broker.createService(CellService);
+    // Create and add nucleus service
+    new NucleusService(broker);
 
     // Start the broker
     await broker.start();
+    console.log(`Cell ${id} started successfully!`);
 
     return broker;
 }
 
-async function main() {
-    try {
-        // Start two cells
-        const cell1 = await startCell('cell-1');
-        const cell2 = await startCell('cell-2');
+program
+    .name('cell')
+    .description('CLI for interacting with the Celluler network')
+    .version('0.1.0');
 
-        // Test sending a message from cell1 to cell2
-        const result = await cell1.call('cell.sendMessage', {
-            content: 'Hello from cell 1!',
-            type: 'greeting'
-        });
+program
+    .command('start')
+    .description('Start a new cell with a NucleusService')
+    .option('-i, --id <id>', 'Cell ID', 'cell-' + Math.random().toString(36).substr(2, 9))
+    .action(async (options) => {
+        try {
+            const broker = await startCell(options.id);
+            
+            // Handle process termination
+            process.on('SIGINT', async () => {
+                console.log('Shutting down cell...');
+                await broker.stop();
+                process.exit(0);
+            });
+        } catch (err) {
+            console.error('Error starting cell:', err);
+            process.exit(1);
+        }
+    });
 
-        console.log('Message sent:', result);
-
-        // Get messages from cell2
-        const messages = await cell2.call('cell.getMessages');
-        console.log('Cell 2 messages:', messages);
-
-        // Keep the cells running for a while
-        setTimeout(async () => {
-            await cell1.stop();
-            await cell2.stop();
-            process.exit(0);
-        }, 5000);
-
-    } catch (err) {
-        console.error('Error:', err);
-        process.exit(1);
-    }
-}
-
-main(); 
+program.parse(); 

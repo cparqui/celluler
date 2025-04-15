@@ -1,62 +1,45 @@
 # Celluler Documentation
 
-Welcome to the Celluler documentation! This is your starting point for understanding and working with the Celluler decentralized AI agent ecosystem.
+Welcome to the Celluler documentation! This is your starting point for understanding and working with the Celluler decentralized microservices platform.
 
 ## Quick Links
 
-- [Getting Started](getting-started.md)
+<!-- - [Getting Started](getting-started.md) -->
 - [Architecture Overview](architecture.md)
 - [Service Development](services.md)
-- [P2P Networking](networking.md)
+<!-- - [P2P Networking](networking.md)
 - [AI Integration](ai.md)
 - [API Reference](api.md)
 - [Market Architecture](markets.md)
-- [Identity Verification](identity.md)
+- [Identity Verification](identity.md) -->
 
 ## What is Celluler?
 
-Celluler is a decentralized AI agent ecosystem built on peer-to-peer protocols, where nodes (called "cells") collaborate to run AI models, host datasets, and provide training feedback in a distributed manner.
+Celluler is a decentralized microservices platform built on peer-to-peer protocols, where each service (called a "cell") is both a self-contained unit and part of a larger network. Cells communicate through a secure messaging protocol and maintain their state through distributed append-only logs (Hypercore) and consensus (Hashgraph).
 
 ## Core Features
 
-- **Distributed AI**: Run AI models across a network of cells
-- **P2P Networking**: Secure and efficient cell-to-cell communication
-- **Consensus**: Maintain global state through distributed consensus
-- **Data Distribution**: Share and version data across the network
-- **Service Architecture**: Modular, scalable service design
-- **Identity Verification**: Social interaction-based identity verification
-- **Market System**: Cooperative resource sharing and trading
+- **P2P Microservices**: Build and deploy decentralized services that communicate directly
+- **Built-in Identity**: Cryptographic identity verification through social interaction history
+- **Consensus**: Byzantine fault-tolerant consensus for global state
+- **Data Integrity**: Tamper-evident logs for all service state
+- **Service Architecture**: Modular, scalable service design using Moleculer
 
 ## Documentation Structure
 
-### 1. Getting Started
-- Installation
-- Basic configuration
-- Running your first cell
-
-### 2. Architecture
+### 1. Architecture
 - System design
 - Service architecture
 - Network topology
 - Security model
 - Identity verification
-- Market system
+- Consensus mechanism
 
-### 3. Development
+### 2. Development
 - Service development
 - Network programming
-- AI integration
 - Testing and deployment
 - Identity system implementation
-- Market integration
-
-### 4. API Reference
-- Service APIs
-- Network protocols
-- Data structures
-- Error handling
-- Identity verification endpoints
-- Market operations
 
 ## Contributing
 

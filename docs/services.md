@@ -6,94 +6,644 @@ Services in Celluler are built using the Moleculer framework and follow a specif
 
 ## Service Structure
 
-Each service follows this basic structure:
+Each service follows these style guidelines:
 
-```typescript
+1. **File Organization**
+   - One service per file
+   - File name is snake_case version of camelCase service name
+   - Located in `src/services` directory
+   - Example: `example_service.js` for `ExampleService`
+
+2. **Service Definition**
+   - Service constructor accepts settings with default value
+   - Service name is camelCase without "Service" suffix
+   - Extends Moleculer Service class
+   - Service schema is parsed separately from super() call
+
+3. **Parameter Validation**
+   - Validation objects defined as global constants
+   - Named with PascalCase and "Params" suffix
+   - Located at top of file
+
+4. **Action Handlers**
+   - Defined as class methods
+   - Named with camelCase
+   - Referenced in action definitions
+
+5. **Event Handlers**
+   - Defined as class methods
+   - Named with "on" prefix and PascalCase
+   - Referenced in event definitions
+
+6. **Settings**
+   - Default settings defined as a constant
+   - Document all available settings
+   - Use lodash's defaultsDeep for merging settings
+
+Example service structure:
+
+```javascript
+// src/services/example_service.js
+
 import { Service } from "moleculer";
+import _ from "lodash";
+
+// Parameter validation objects
+const ExampleActionParams = {
+    input: {
+        type: "string",
+        min: 1,
+        max: 100
+    },
+    options: {
+        type: "object",
+        optional: true,
+        props: {
+            flag: { type: "boolean", optional: true },
+            count: { type: "number", optional: true }
+        }
+    }
+};
+
+// Default settings
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    storagePath: "./data/example",  // Path for service data storage
+    maxStorageSize: 1024 * 1024 * 100,  // Maximum storage size in bytes
+    
+    // Network settings
+    timeout: 5000,  // Default timeout in milliseconds
+    retryCount: 3,  // Number of retry attempts
+    
+    // Feature flags
+    enableFeatureX: false,  // Enable experimental feature X
+    enableFeatureY: true,   // Enable feature Y
+    
+    // Performance settings
+    batchSize: 100,  // Size of processing batches
+    cacheSize: 1000, // Size of in-memory cache
+    
+    // Security settings
+    requireAuth: true,  // Require authentication
+    allowedOrigins: ["*"],  // CORS allowed origins
+};
 
 export default class ExampleService extends Service {
-    public constructor() {
-        super({
+    constructor(broker, settings = {}) {
+        super(broker);
+
+        this.parseServiceSchema({
             name: "example",
             version: 1,
-            settings: {
-                // Service-specific settings
-            },
+            settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
             dependencies: [
-                // Other services this service depends on
+                "other"
             ],
             actions: {
-                // Service actions
+                exampleAction: {
+                    params: ExampleActionParams,
+                    handler: this.exampleAction
+                }
             },
             events: {
-                // Service events
+                "example.event": this.onExampleEvent
             },
-            methods: {
-                // Private methods
-            }
+            created: this.onCreated,
+            started: this.onStarted,
+            stopped: this.onStopped
         });
+    }
+
+    // Lifecycle events
+    onCreated() {
+        this.logger.info("Example service created");
+    }
+
+    async onStarted() {
+        this.logger.info("Example service started");
+    }
+
+    async onStopped() {
+        this.logger.info("Example service stopped");
+    }
+
+    // Action handlers
+    async exampleAction(ctx) {
+        const { input, options } = ctx.params;
+        // Process input with options
+        return { result: "success" };
+    }
+
+    // Event handlers
+    async onExampleEvent(ctx) {
+        // Handle example event
     }
 }
 ```
 
 ## Core Service Types
 
-### 1. DataService
+### 1. NucleusService
 
-Provides an abstraction layer for distributed data operations:
+Manages cell configuration and coordinates service interactions:
 
-```typescript
-export default class DataService extends Service {
-    public constructor() {
-        super({
-            name: "data",
+```javascript
+// src/services/nucleus_service.js
+
+import { Service } from "moleculer";
+import _ from "lodash";
+
+const JournalUpdateParams = {
+    service: "string",
+    operation: {
+        type: "enum",
+        values: ["append", "truncate", "sync"]
+    },
+    data: "any",
+    proof: "string"
+};
+
+const ServiceRegisterParams = {
+    service: {
+        type: "object",
+        props: {
+            name: "string",
+            version: "string",
+            dependencies: "array"
+        }
+    }
+};
+
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    journalPath: "./data/nucleus",  // Path for nucleus journal
+    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
+    
+    // Network settings
+    timeout: 5000,  // Default timeout in milliseconds
+    retryCount: 3,  // Number of retry attempts
+    
+    // Security settings
+    requireAuth: true,  // Require authentication
+    requireProof: true,  // Require operation proofs
+    
+    // Performance settings
+    batchSize: 100,  // Size of processing batches
+    cacheSize: 1000, // Size of in-memory cache
+    
+    // Cell configuration
+    cellId: null,    // Unique identifier for the cell
+    cellName: null,  // Human-readable cell name
+    cellVersion: "1.0.0",  // Cell version
+    cellConfig: {    // Cell-specific configuration
+        features: [],
+        capabilities: [],
+        limits: {}
+    }
+};
+
+export default class NucleusService extends Service {
+    constructor(broker, settings = {}) {
+        super(broker, {
+            name: "nucleus",
+            version: 1,
+            settings: {
+                ...DEFAULT_SETTINGS,
+                ...settings
+            },
+            dependencies: [],
             actions: {
-                store: {
-                    params: {
-                        key: "string",
-                        data: "any"
-                    },
-                    async handler(ctx) {
-                        // Store data in distributed storage
-                        // Currently implemented using DAT protocol
-                    }
+                updateJournal: {
+                    params: JournalUpdateParams,
+                    handler: this.updateJournal
                 },
-                retrieve: {
-                    params: {
-                        key: "string"
-                    },
-                    async handler(ctx) {
-                        // Retrieve data from distributed storage
-                        // Currently implemented using DAT protocol
-                    }
+                registerService: {
+                    params: ServiceRegisterParams,
+                    handler: this.registerService
+                },
+                getCellConfig: {
+                    handler: this.getCellConfig
                 }
+            },
+            events: {
+                "service.registered": this.onServiceRegistered,
+                "journal.updated": this.onJournalUpdated
             }
         });
+    }
+
+    async updateJournal(ctx) {
+        const { service, operation, data, proof } = ctx.params;
+        // Validate operation proof
+        // Update Hypercore journal
+        // Notify affected services
+        return { success: true };
+    }
+
+    async registerService(ctx) {
+        const { service } = ctx.params;
+        // Register new service
+        // Update service registry
+        // Initialize service dependencies
+        return { success: true };
+    }
+
+    async getCellConfig(ctx) {
+        // Return cell configuration
+        return {
+            cellId: this.settings.cellId,
+            cellName: this.settings.cellName,
+            cellVersion: this.settings.cellVersion,
+            cellConfig: this.settings.cellConfig
+        };
+    }
+
+    async onServiceRegistered(ctx) {
+        // Handle service registration events
+    }
+
+    async onJournalUpdated(ctx) {
+        // Handle journal update events
+    }
+}
+
+### 2. MessageService
+
+Handles message routing, delivery, and verification:
+
+```javascript
+// src/services/message_service.js
+
+import { Service } from "moleculer";
+import _ from "lodash";
+
+const MessageSendParams = {
+    message: {
+        type: "object",
+        props: {
+            timestamp: "number",
+            sender: "string",
+            receiver: "string",
+            type: "string",
+            body: "any",
+            signature: "string",
+            proof: "string"
+        }
+    }
+};
+
+const MessageReceiveParams = {
+    message: "object"
+};
+
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    journalPath: "./data/message",  // Path for message journal
+    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
+    
+    // Network settings
+    timeout: 10000,  // Message timeout in milliseconds
+    retryCount: 5,   // Number of delivery retries
+    
+    // Security settings
+    requireSignature: true,  // Require message signatures
+    requireProof: true,      // Require identity proofs
+    
+    // Performance settings
+    batchSize: 50,   // Message batch size
+    cacheSize: 1000, // Message cache size
+    
+    // Nested settings
+    storage: {
+        type: "hypercore",
+        options: {
+            maxSize: 1024 * 1024 * 1000,
+            compression: true
+        }
+    },
+    network: {
+        protocol: "tcp",
+        options: {
+            keepAlive: true,
+            timeout: 10000
+        }
+    }
+};
+
+export default class MessageService extends Service {
+    constructor(broker, settings = {}) {
+        super(broker, {
+            name: "message",
+            version: 1,
+            settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
+            dependencies: [
+                "identity",
+                "consensus"
+            ],
+            actions: {
+                send: {
+                    params: MessageSendParams,
+                    handler: this.sendMessage
+                },
+                receive: {
+                    params: MessageReceiveParams,
+                    handler: this.receiveMessage
+                }
+            },
+            events: {
+                "message.received": this.onMessageReceived
+            }
+        });
+    }
+
+    async sendMessage(ctx) {
+        const { message } = ctx.params;
+        // Validate message signature and proof
+        // Route message to target cell
+        // Store in Hypercore journal
+        return { success: true };
+    }
+
+    async receiveMessage(ctx) {
+        const { message } = ctx.params;
+        // Process incoming message
+        // Update message journal
+        // Trigger appropriate events
+        return { success: true };
+    }
+
+    async onMessageReceived(ctx) {
+        // Handle message reception events
     }
 }
 ```
 
-### 2. ConsensusService
+### 3. StateService
 
-Manages distributed consensus and state agreement:
+Manages local and global state synchronization:
 
-```typescript
-export default class ConsensusService extends Service {
-    public constructor() {
-        super({
-            name: "consensus",
+```javascript
+// src/services/state_service.js
+
+import { Service } from "moleculer";
+import _ from "lodash";
+
+const StateUpdateParams = {
+    key: "string",
+    value: "any",
+    proof: "string"
+};
+
+const StateQueryParams = {
+    key: "string"
+};
+
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    journalPath: "./data/state",  // Path for state journal
+    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
+    
+    // Network settings
+    timeout: 5000,  // Default timeout in milliseconds
+    retryCount: 3,  // Number of retry attempts
+    
+    // Security settings
+    requireAuth: true,  // Require authentication
+    requireProof: true,  // Require state proofs
+    
+    // Performance settings
+    batchSize: 100,  // Size of processing batches
+    cacheSize: 1000  // Size of in-memory cache
+};
+
+export default class StateService extends Service {
+    constructor(broker, settings = {}) {
+        super(broker, {
+            name: "state",
+            version: 1,
+            settings: {
+                ...DEFAULT_SETTINGS,
+                ...settings
+            },
+            dependencies: [
+                "consensus"
+            ],
             actions: {
-                submitEvent: {
-                    params: {
-                        event: "object"
-                    },
-                    async handler(ctx) {
-                        // Submit event for consensus
-                        // Currently implemented using Hashgraph algorithm
-                    }
+                update: {
+                    params: StateUpdateParams,
+                    handler: this.updateState
+                },
+                query: {
+                    params: StateQueryParams,
+                    handler: this.queryState
                 }
+            },
+            events: {
+                "state.updated": this.onStateUpdated
             }
         });
+    }
+
+    async updateState(ctx) {
+        const { key, value, proof } = ctx.params;
+        // Validate state update proof
+        // Apply state change
+        // Store in Hypercore journal
+        // Propagate through consensus
+        return { success: true };
+    }
+
+    async queryState(ctx) {
+        const { key } = ctx.params;
+        // Retrieve state from Hypercore journal
+        // Verify state integrity
+        return { value: null };
+    }
+
+    async onStateUpdated(ctx) {
+        // Handle state update events
+    }
+}
+```
+
+### 4. IdentityService
+
+Manages cell identity and trust networks:
+
+```javascript
+// src/services/identity_service.js
+
+import { Service } from "moleculer";
+import _ from "lodash";
+
+const IdentityVerifyParams = {
+    identity: {
+        type: "object",
+        props: {
+            cellId: "string",
+            proof: "string",
+            trustNetwork: "array"
+        }
+    }
+};
+
+const IdentityProofParams = {
+    data: "any"
+};
+
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    journalPath: "./data/identity",  // Path for identity journal
+    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
+    
+    // Network settings
+    timeout: 5000,  // Default timeout in milliseconds
+    retryCount: 3,  // Number of retry attempts
+    
+    // Security settings
+    requireAuth: true,  // Require authentication
+    requireProof: true,  // Require identity proofs
+    
+    // Performance settings
+    batchSize: 100,  // Size of processing batches
+    cacheSize: 1000  // Size of in-memory cache
+};
+
+export default class IdentityService extends Service {
+    constructor(broker, settings = {}) {
+        super(broker, {
+            name: "identity",
+            version: 1,
+            settings: {
+                ...DEFAULT_SETTINGS,
+                ...settings
+            },
+            dependencies: [],
+            actions: {
+                verify: {
+                    params: IdentityVerifyParams,
+                    handler: this.verifyIdentity
+                },
+                generateProof: {
+                    params: IdentityProofParams,
+                    handler: this.generateIdentityProof
+                }
+            },
+            events: {
+                "identity.verified": this.onIdentityVerified
+            }
+        });
+    }
+
+    async verifyIdentity(ctx) {
+        const { identity } = ctx.params;
+        // Verify identity proof
+        // Update trust network
+        // Store in Hypercore journal
+        return { verified: true };
+    }
+
+    async generateIdentityProof(ctx) {
+        const { data } = ctx.params;
+        // Generate identity proof
+        // Store in Hypercore journal
+        return { proof: "" };
+    }
+
+    async onIdentityVerified(ctx) {
+        // Handle identity verification events
+    }
+}
+```
+
+### 5. ConsensusService
+
+Manages Hashgraph consensus and event propagation:
+
+```javascript
+// src/services/consensus_service.js
+
+import { Service } from "moleculer";
+import _ from "lodash";
+
+const EventSubmitParams = {
+    event: {
+        type: "object",
+        props: {
+            type: "string",
+            data: "any",
+            timestamp: "number",
+            signature: "string"
+        }
+    }
+};
+
+const ConsensusQueryParams = {
+    eventId: "string"
+};
+
+const DEFAULT_SETTINGS = {
+    // Storage settings
+    journalPath: "./data/consensus",  // Path for consensus journal
+    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
+    
+    // Network settings
+    timeout: 5000,  // Default timeout in milliseconds
+    retryCount: 3,  // Number of retry attempts
+    
+    // Security settings
+    requireAuth: true,  // Require authentication
+    requireProof: true,  // Require consensus proofs
+    
+    // Performance settings
+    batchSize: 100,  // Size of processing batches
+    cacheSize: 1000  // Size of in-memory cache
+};
+
+export default class ConsensusService extends Service {
+    constructor(broker, settings = {}) {
+        super(broker, {
+            name: "consensus",
+            version: 1,
+            settings: {
+                ...DEFAULT_SETTINGS,
+                ...settings
+            },
+            dependencies: [],
+            actions: {
+                submitEvent: {
+                    params: EventSubmitParams,
+                    handler: this.submitEvent
+                },
+                getConsensus: {
+                    params: ConsensusQueryParams,
+                    handler: this.getConsensus
+                }
+            },
+            events: {
+                "consensus.reached": this.onConsensusReached
+            }
+        });
+    }
+
+    async submitEvent(ctx) {
+        const { event } = ctx.params;
+        // Validate event
+        // Add to Hashgraph
+        // Propagate to network
+        // Store in Hypercore journal
+        return { success: true };
+    }
+
+    async getConsensus(ctx) {
+        const { eventId } = ctx.params;
+        // Retrieve consensus state
+        // Verify consensus proof
+        return { consensus: null };
+    }
+
+    async onConsensusReached(ctx) {
+        // Handle consensus events
     }
 }
 ```
@@ -107,7 +657,7 @@ export default class ConsensusService extends Service {
 - Handle errors gracefully
 - Document action parameters and return values
 
-```typescript
+```javascript
 actions: {
     exampleAction: {
         params: {
@@ -133,7 +683,7 @@ actions: {
 - Keep event handlers idempotent
 - Document event payload structure
 
-```typescript
+```javascript
 events: {
     "example.event": {
         async handler(ctx) {
@@ -149,7 +699,7 @@ events: {
 - Provide meaningful error messages
 - Log errors appropriately
 
-```typescript
+```javascript
 if (!data) {
     throw new MoleculerError("Data not found", 404, "DATA_NOT_FOUND");
 }
@@ -159,7 +709,7 @@ if (!data) {
 
 ### 1. Unit Testing
 
-```typescript
+```javascript
 import { ServiceBroker } from "moleculer";
 import ExampleService from "./example.service";
 
@@ -179,7 +729,7 @@ describe("Example Service", () => {
 
 ### 2. Integration Testing
 
-```typescript
+```javascript
 describe("Service Integration", () => {
     it("should work with other services", async () => {
         const result = await broker.call("example.action", {
@@ -214,13 +764,13 @@ describe("Service Integration", () => {
 
 ### 1. Metrics
 
-```typescript
+```javascript
 this.broker.metrics.increment("action.called", { action: "example" });
 ```
 
 ### 2. Health Checks
 
-```typescript
+```javascript
 actions: {
     health: {
         async handler(ctx) {
@@ -237,7 +787,7 @@ actions: {
 
 ### 1. Authentication
 
-```typescript
+```javascript
 actions: {
     secureAction: {
         auth: "required",
@@ -250,7 +800,7 @@ actions: {
 
 ### 2. Authorization
 
-```typescript
+```javascript
 actions: {
     adminAction: {
         auth: {
@@ -267,7 +817,7 @@ actions: {
 
 ### 1. Action Documentation
 
-```typescript
+```javascript
 actions: {
     exampleAction: {
         description: "Example action description",
@@ -286,7 +836,7 @@ actions: {
 
 ### 2. Event Documentation
 
-```typescript
+```javascript
 events: {
     "example.event": {
         description: "Event description",
@@ -295,4 +845,5 @@ events: {
         }
     }
 }
+``` 
 ``` 

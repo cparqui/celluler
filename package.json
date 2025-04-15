@@ -1,18 +1,28 @@
 {
   "name": "celluler",
-  "version": "0.1.0",
-  "description": "A decentralized AI agent ecosystem built on peer-to-peer protocols",
+  "version": "1.0.0",
+  "description": "Decentralized microservices platform with built-in identity and consensus",
+  "type": "module",
   "main": "src/index.js",
+  "bin": {
+    "cell": "./src/index.js"
+  },
   "scripts": {
-    "start": "node src/index.js",
-    "test": "jest"
+    "start": "node src/index.js start",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/unit",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch"
   },
   "dependencies": {
     "moleculer": "^0.14.28",
     "hypercore": "^10.0.0",
-    "random-access-memory": "^5.0.0"
+    "random-access-memory": "^5.0.0",
+    "commander": "^11.1.0",
+    "b4a": "^1.6.4",
+    "corestore": "^7.4.0",
+    "hyperswarm": "4.11.0"
   },
   "devDependencies": {
-    "jest": "^29.0.0"
+    "jest": "^29.7.0"
   }
 }

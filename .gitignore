@@ -59,5 +59,7 @@ temp/
 # Yarn Integrity file
 .yarn-integrity 
 
-# local knowledge base
+# Local directories to ignore
+data/**
 knowledge/**
+**/archive/**
