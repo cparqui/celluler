@@ -1,0 +1,46 @@
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {%- seo -%}
+  <link rel="stylesheet" href="{{ "/assets/css/just-the-docs.css" | absolute_url }}">
+  {%- feed_meta -%}
+  {%- if jekyll.environment == 'production' and site.google_analytics -%}
+    {%- include google-analytics.html -%}
+  {%- endif -%}
+
+  <style>
+    /* Dark mode toggle button */
+    .dark-mode-toggle {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      padding: 0.5rem;
+      background: var(--code-background);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    .dark-mode-toggle:hover {
+      transform: scale(1.1);
+    }
+
+    .dark-mode-toggle .icon {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+
+    /* Dark mode specific styles */
+    [data-color-scheme="dark"] {
+      --body-background: #1a1a1a;
+      --body-text-color: #e0e0e0;
+      --link-color: #4dabf7;
+      --code-background: #2d2d2d;
+      --border-color: #404040;
+    }
+  </style>
+</head> 
