@@ -62,6 +62,7 @@ temp/
 # Local directories to ignore
 data/**
 knowledge/**
+**/.sass-cache/**
 **/archive/**
 **/vendor/**
 **/_site/**

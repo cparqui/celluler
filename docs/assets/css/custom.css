@@ -10,23 +10,21 @@
 
 /* Custom checkmark styling */
 .task-list-item input[type="checkbox"]:checked {
-    background-color: #2ea44f;
-    border-color: #2ea44f;
+    background-color: #00ff00;
+    border-color: #00ff00;
 }
 
 /* Dark mode adjustments */
-[data-theme="dark"] .task-list-item input[type="checkbox"]:checked {
-    background-color: #238636;
-    border-color: #238636;
+@media (prefers-color-scheme: dark) {
+    .task-list-item input[type="checkbox"]:checked {
+        background-color: #00ff00;
+        border-color: #00ff00;
+    }
 }
 
 /* Hover effects */
 .task-list-item input[type="checkbox"]:hover {
-    border-color: #2ea44f;
-}
-
-[data-theme="dark"] .task-list-item input[type="checkbox"]:hover {
-    border-color: #238636;
+    border-color: #00ff00;
 }
 
 /* Custom styles for Celluler documentation */
@@ -61,16 +59,16 @@ table {
 
 th, td {
     padding: 0.5em;
-    border: 1px solid var(--border);
+    border: 1px solid #666;
 }
 
 th {
-    background-color: var(--code-background);
+    background-color: #333;
 }
 
 /* Link styling */
 a {
-    color: var(--primary);
+    color: #00ff00;
     text-decoration: none;
 }
 
@@ -83,8 +81,8 @@ a:hover {
     padding: 1em;
     margin: 1em 0;
     border-radius: 4px;
-    border-left: 4px solid var(--primary);
-    background-color: var(--code-background);
+    border-left: 4px solid #00ff00;
+    background-color: #333;
 }
 
 .callout.warning {
@@ -96,7 +94,7 @@ a:hover {
 }
 
 .callout.success {
-    border-left-color: #28a745;
+    border-left-color: #00ff00;
 }
 
 /* Add any custom styles here */
