@@ -45,7 +45,6 @@ export default class NucleusService extends Service {
 
         this.parseServiceSchema({
             name: "nucleus",
-            version: 1,
             settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
             dependencies: [],
             actions: {
@@ -62,10 +61,6 @@ export default class NucleusService extends Service {
                     handler: this.write
                 }
             },
-            // events: {
-            //     "core.ready": ctx => this.onCoreReady(ctx),
-            //     "swarm.connection": ctx => this.onSwarmConnection(ctx)
-            // }
             created: this.onCreated,
             started: this.onStarted,
             stopped: this.onStopped,
@@ -75,42 +70,34 @@ export default class NucleusService extends Service {
     // Lifecycle events
     onCreated() {
         this.logger.info("Nucleus service created");
-
+        this.logger.debug("Initializing Corestore with path:", this.settings.storagePath);
+        
         // Initialize corestore
         this.store = new Corestore(this.settings.storagePath);
-        this.cores = {}
+        this.cores = {};
         
         // Initialize hyperswarm
+        this.logger.debug("Initializing Hyperswarm");
         this.swarm = new Hyperswarm();
         this.swarm.on('connection', (conn) => {
+            this.logger.debug("New Hyperswarm connection established");
             this.store.replicate(conn);
-            // this.broker.emit("swarm.connection", { connection: conn });
         });
         this.swarm.on('error', (err) => this.logger.error(err, 'Hyperswarm error'));
     }
 
     async onStarted() {
         this.logger.info("Nucleus service started");
-
-        // Initialize corestore
-        this.store = new Corestore(this.settings.storagePath);
-        this.cores = {}
         
         // Initialize journal core
+        this.logger.debug("Initializing journal core");
         this.journal = this.store.get({ name: 'journal', valueEncoding: 'json' });
-        this.cores['journal'] = this.journal
+        this.cores['journal'] = this.journal;
         await this.journal.ready();
         this.logger.info("Journal ready:", getCoreInfo(this.journal, 'journal'));
-
-        // Initialize hyperswarm
-        this.swarm = new Hyperswarm();
-        this.swarm.on('connection', (conn) => {
-            this.store.replicate(conn);
-            this.broker.emit("swarm.connection", { connection: conn });
-        });
-        this.swarm.on('error', (err) => this.logger.error(err, 'Hyperswarm error'));
         
         // Join the journal topic by default
+        this.logger.debug("Joining journal topic");
         await this.swarm.join(this.journal.discoveryKey);
     }
 
@@ -218,17 +205,6 @@ export default class NucleusService extends Service {
         }
     }
 
-    // Event handlers
-    // async onCoreReady(ctx) {
-    //     const { name, core } = ctx.params;
-    //     this.logger.info(`Core ready: ${name}`, core);
-    // }
-
-    // async onSwarmConnection(ctx) {
-    //     const { connection } = ctx.params;
-    //     this.logger.info("New swarm connection established");
-    // }
-
     // Helper methods
     async getCore(name, key = undefined, valueEncoding = 'json') {
         // Get or create the named core
@@ -236,11 +212,6 @@ export default class NucleusService extends Service {
         await core.ready();
         this.logger.info("Hypercore ready:", getCoreInfo(core, name));
         this.cores[name] = core;
-
-        // this.broker.emit("core.ready", { 
-        //     name,
-        //     core: getCoreInfo(core)
-        // });
 
         return core;
     }

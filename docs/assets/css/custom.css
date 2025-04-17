@@ -1,0 +1,30 @@
+/* Task list styling */
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item input[type="checkbox"] {
+    margin: 0 0.2em 0.25em -1.6em;
+    vertical-align: middle;
+}
+
+/* Custom checkmark styling */
+.task-list-item input[type="checkbox"]:checked {
+    background-color: #2ea44f;
+    border-color: #2ea44f;
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .task-list-item input[type="checkbox"]:checked {
+    background-color: #238636;
+    border-color: #238636;
+}
+
+/* Hover effects */
+.task-list-item input[type="checkbox"]:hover {
+    border-color: #2ea44f;
+}
+
+[data-theme="dark"] .task-list-item input[type="checkbox"]:hover {
+    border-color: #238636;
+} 

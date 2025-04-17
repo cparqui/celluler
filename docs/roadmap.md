@@ -10,14 +10,27 @@
   - [x] Service lifecycle management
   - [x] Unit tests
   - [x] Logging and error handling
-  - [ ] Integration tests with other services
 
 ### 2. Basic CLI Tool
 - [x] Create basic CLI tool structure
 - [x] Create basic cell startup script
-- [ ] Add configuration file support
-- [ ] Add environment variable support
-- [ ] Add logging configuration
+- [ ] Configuration System
+  - [x] Define YAML configuration schema
+  - [x] Implement YAML parser and validator
+  - [x] Create configuration templates
+  - [ ] Add environment variable support
+  - [ ] Add configuration inheritance
+  - [x] Add configuration validation
+- [ ] Deployment Configuration
+  - [ ] Local service deployment
+  - [ ] Docker Compose deployment
+  - [ ] Kubernetes deployment
+  - [ ] Environment-specific configurations
+- [ ] Logging Configuration
+  - [x] Structured logging setup
+  - [x] Log level configuration
+  - [x] Log output configuration
+  - [ ] Log rotation and retention
 
 ### 3. Testing Framework
 - [x] Set up Jest testing framework
@@ -38,6 +51,7 @@
 - [x] Document NucleusService architecture
 - [ ] Add getting started guide
 - [ ] Add configuration guide
+- [ ] Add deployment guides for different environments
 
 ## Phase 2: Network Foundation
 
@@ -47,14 +61,12 @@
   - [ ] Hypercore-based message journal
   - [ ] Message verification
   - [ ] Unit tests
-  - [ ] Integration tests
 
 - [ ] IdentityService
   - [ ] Cell identity verification
   - [ ] Trust network management
   - [ ] Social interaction proofs
   - [ ] Unit tests
-  - [ ] Integration tests
 
 ### 2. Cell-to-Cell Communication
 - [ ] Evaluate communication options:
@@ -100,7 +112,6 @@
   - [ ] State verification
   - [ ] Hypercore journal
   - [ ] Unit tests
-  - [ ] Integration tests
 
 - [ ] ConsensusService
   - [ ] Hashgraph consensus algorithm
@@ -108,13 +119,14 @@
   - [ ] Event validation
   - [ ] Consensus state management
   - [ ] Unit tests
-  - [ ] Integration tests
 
 ### 2. Integration Testing
 - [ ] Add multi-cell test scenarios
 - [ ] Add network simulation
 - [ ] Add load testing
 - [ ] Add stress testing
+- [ ] Add service interaction tests
+- [ ] Add deployment environment tests
 
 ### 3. Advanced Security
 - [ ] Implement end-to-end encryption

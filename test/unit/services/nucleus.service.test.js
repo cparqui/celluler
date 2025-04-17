@@ -22,10 +22,10 @@ describe("Test 'nucleus' service", () => {
         console.log('Test: afterAll complete');
     });
 
-    describe("Test 'v1.nucleus.bind' action", () => {
+    describe("Test 'nucleus.bind' action", () => {
         it("should bind to a new core with topic", async () => {
             const topic = "test-topic";
-            const result = await broker.call("v1.nucleus.bind", { topic });
+            const result = await broker.call("nucleus.bind", { topic });
             
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
@@ -36,10 +36,10 @@ describe("Test 'nucleus' service", () => {
 
         it("should bind to existing core with key", async () => {
             const topic = "test-topic";
-            const firstResult = await broker.call("v1.nucleus.bind", { topic });
+            const firstResult = await broker.call("nucleus.bind", { topic });
             const key = firstResult.core.key;
             
-            const result = await broker.call("v1.nucleus.bind", { topic, key });
+            const result = await broker.call("nucleus.bind", { topic, key });
             expect(result.success).toBe(true);
             expect(result.core.key).toBe(key);
         });
@@ -47,16 +47,16 @@ describe("Test 'nucleus' service", () => {
         it("should reject with ValidationError for missing topic", async () => {
             expect.assertions(1);
             try {
-                await broker.call("v1.nucleus.bind", {});
+                await broker.call("nucleus.bind", {});
             } catch (err) {
                 expect(err.name).toBe("ValidationError");
             }
         });
     });
 
-    describe("Test 'v1.nucleus.get' action", () => {
+    describe("Test 'nucleus.get' action", () => {
         it("should get journal core by default", async () => {
-            const result = await broker.call("v1.nucleus.get");
+            const result = await broker.call("nucleus.get");
             
             expect(result).toBeDefined();
             expect(result.name).toBe("journal");
@@ -65,27 +65,27 @@ describe("Test 'nucleus' service", () => {
 
         it("should get specific core by name", async () => {
             const name = "test-core";
-            await broker.call("v1.nucleus.bind", { topic: name });
+            await broker.call("nucleus.bind", { topic: name });
             
-            const result = await broker.call("v1.nucleus.get", { name });
+            const result = await broker.call("nucleus.get", { name });
             expect(result.name).toBe(name);
             expect(result.core).toBeDefined();
         });
 
         it("should get core by key", async () => {
             const topic = "test-core";
-            const bindResult = await broker.call("v1.nucleus.bind", { topic });
+            const bindResult = await broker.call("nucleus.bind", { topic });
             const key = bindResult.core.publicKey;
             
-            const result = await broker.call("v1.nucleus.get", { key });
+            const result = await broker.call("nucleus.get", { key });
             expect(result.core.publicKey).toBe(key);
         });
     });
 
-    describe("Test 'v1.nucleus.write' action", () => {
+    describe("Test 'nucleus.write' action", () => {
         it("should write to journal core by default", async () => {
             const data = { test: "data" };
-            const result = await broker.call("v1.nucleus.write", { data });
+            const result = await broker.call("nucleus.write", { data });
             
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
@@ -95,10 +95,10 @@ describe("Test 'nucleus' service", () => {
 
         it("should write to specific core", async () => {
             const name = "test-write-core";
-            await broker.call("v1.nucleus.bind", { topic: name });
+            await broker.call("nucleus.bind", { topic: name });
             
             const data = { test: "data" };
-            const result = await broker.call("v1.nucleus.write", { name, data });
+            const result = await broker.call("nucleus.write", { name, data });
             
             expect(result.success).toBe(true);
             expect(result.name).toBe(name);
@@ -107,7 +107,7 @@ describe("Test 'nucleus' service", () => {
         it("should reject with ValidationError for missing data", async () => {
             expect.assertions(1);
             try {
-                await broker.call("v1.nucleus.write", {});
+                await broker.call("nucleus.write", {});
             } catch (err) {
                 expect(err.name).toBe("ValidationError");
             }
@@ -120,7 +120,7 @@ describe("Test 'nucleus' service", () => {
             const topic = "test-event-core";
             const eventSpy = jest.spyOn(broker, "emit");
 
-            await broker.call("v1.nucleus.bind", { topic });
+            await broker.call("nucleus.bind", { topic });
 
             expect(eventSpy).toHaveBeenCalledWith(
                 "core.ready",

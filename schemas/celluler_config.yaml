@@ -1,0 +1,188 @@
+# Celluler Configuration Reference
+# This file serves as a reference for the Celluler configuration schema
+# For validation, see celluler_config.schema.json
+# For documentation, see docs/configuration.md
+
+version: 1  # Schema version
+
+cell:
+  # Basic cell configuration
+  name: string  # Human-readable cell name
+  id: string    # Unique cell identifier (maps to nodeID)
+  
+  # Network configuration
+  namespace: string  # Namespace for cell grouping
+  transporter: 
+    type: string    # e.g., "nats", "redis", "mqtt"
+    options: object # Transporter-specific options
+  
+  # Service configuration
+  services:
+    enabled: string[]  # List of services to enable
+    config: object     # Service-specific configurations
+  
+  # Logging configuration
+  logging:
+    level: string|object  # Global log level or module-specific levels
+    output:
+      - type: string     # Logger type (Console, File, etc.)
+        options:
+          level: string|object  # Logger-specific level override
+          formatter: string     # Log formatter (full, short, simple, json)
+          colors: boolean       # Enable colors in console output
+          moduleColors: boolean # Enable module-specific colors
+          autoPadding: boolean  # Auto-pad module names
+          folder: string        # Log folder path (File logger)
+          filename: string      # Log filename template (File logger)
+          eol: string          # End of line character
+          interval: number      # File appending interval in ms
+  
+  # Performance configuration
+  performance:
+    requestTimeout: number    # Request timeout in milliseconds
+    maxCallLevel: number      # Maximum call level for infinite loop protection
+    heartbeatInterval: number # Heartbeat interval in seconds
+    heartbeatTimeout: number  # Heartbeat timeout in seconds
+  
+  # Security configuration
+  security:
+    tls: boolean
+    auth: boolean
+    encryption: boolean
+  
+  # Registry configuration
+  registry:
+    strategy: string    # RoundRobin, Random, etc.
+    preferLocal: boolean
+  
+  # Circuit breaker configuration
+  circuitBreaker:
+    enabled: boolean
+    threshold: number
+    windowTime: number
+    minRequestCount: number
+    halfOpenTime: number
+  
+  # Bulkhead configuration
+  bulkhead:
+    enabled: boolean
+    concurrency: number
+    maxQueueSize: number
+  
+  # Metrics configuration
+  metrics:
+    enabled: boolean
+    reporter: string[]  # Console, Prometheus, etc.
+  
+  # Tracing configuration
+  tracing:
+    enabled: boolean
+    exporter: string[]  # Console, Jaeger, etc.
+  
+  # Caching configuration
+  cacher:
+    type: string        # Memory, Redis, etc.
+    options: object     # Cacher-specific options
+  
+  # Serializer configuration
+  serializer:
+    type: string        # JSON, MsgPack, etc.
+    options: object     # Serializer-specific options
+  
+  # Middleware configuration
+  middlewares: string[] # List of middleware names to enable
+  
+  # Custom metadata
+  metadata: object      # Custom key-value pairs
+
+# Example configuration
+---
+version: 1
+
+cell:
+  name: "my-cell"
+  id: "cell-1"
+  
+  namespace: "development"
+  transporter:
+    type: "nats"
+    options:
+      url: "nats://localhost:4222"
+  
+  services:
+    enabled:
+      - "nucleus"
+      - "message"
+    config:
+      nucleus:
+        storage: "memory"
+        encryption: true
+      message:
+        protocol: "hyperswarm"
+  
+  logging:
+    level: "info"
+    output:
+      - type: "Console"
+        options:
+          formatter: "full"
+          colors: true
+          moduleColors: false
+          autoPadding: false
+      - type: "File"
+        options:
+          formatter: "json"
+          folder: "/var/log/celluler"
+          filename: "cell-{date}.log"
+          eol: "\n"
+          interval: 1000
+  
+  performance:
+    requestTimeout: 5000
+    maxCallLevel: 100
+    heartbeatInterval: 5
+    heartbeatTimeout: 15
+  
+  security:
+    tls: true
+    auth: true
+    encryption: true
+  
+  registry:
+    strategy: "RoundRobin"
+    preferLocal: true
+  
+  circuitBreaker:
+    enabled: true
+    threshold: 0.5
+    windowTime: 60
+    minRequestCount: 20
+    halfOpenTime: 10000
+  
+  bulkhead:
+    enabled: true
+    concurrency: 10
+    maxQueueSize: 100
+  
+  metrics:
+    enabled: true
+    reporter: ["Console"]
+  
+  tracing:
+    enabled: true
+    exporter: ["Console"]
+  
+  cacher:
+    type: "Memory"
+    options:
+      max: 1000
+  
+  serializer:
+    type: "JSON"
+  
+  middlewares:
+    - "MyMiddleware"
+  
+  metadata:
+    region: "us-west-1"
+    environment: "development" 

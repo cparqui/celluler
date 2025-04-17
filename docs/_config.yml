@@ -1,6 +1,6 @@
 title: Celluler Documentation
-description: Documentation for the Celluler decentralized AI agent ecosystem
-theme: jekyll-theme-minimal
+description: Documentation for the Celluler decentralized microservices ecosystem
+remote_theme: pmarsceill/just-the-docs
 plugins:
   - jekyll-relative-links
   - jekyll-seo-tag
@@ -29,4 +29,21 @@ exclude:
   - package-lock.json
   - .gitignore
   - .git
-  - README.md 
+  - README.md
+
+# Just the Docs theme settings
+just_the_docs:
+  # Enable dark mode
+  dark_mode_toggle: true
+  # Enable system preference detection
+  dark_mode_system_preference: true
+  # Enable search
+  search: true
+  # Enable navigation
+  nav_fold: true
+  # Enable back to top button
+  back_to_top: true
+
+# Custom CSS
+stylesheets:
+  - /assets/css/custom.css 
