@@ -28,6 +28,7 @@ exclude:
   - .gitignore
   - .git
   - README.md
+  - vendor
 
 # Just the Docs theme settings
 just_the_docs:

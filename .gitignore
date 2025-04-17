@@ -63,3 +63,5 @@ temp/
 data/**
 knowledge/**
 **/archive/**
+**/vendor/**
+**/_site/**
