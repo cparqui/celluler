@@ -1,11 +1,6 @@
 title: Celluler Documentation
 description: Documentation for the Celluler decentralized microservices ecosystem
-remote_theme: pmarsceill/just-the-docs
-plugins:
-  - jekyll-relative-links
-  - jekyll-seo-tag
-  - jekyll-sitemap
-  - jekyll-remote-theme
+theme: jekyll-theme-hacker
 
 # Navigation
 nav:
@@ -31,42 +26,6 @@ exclude:
   - README.md
   - vendor
 
-# Just the Docs theme settings
-just_the_docs:
-  # Enable dark mode
-  dark_mode_toggle: true
-  # Enable system preference detection
-  dark_mode_system_preference: true
-  # Enable search
-  search: true
-  # Enable navigation
-  nav_fold: true
-  # Enable back to top button
-  back_to_top: true
-  # Color scheme settings
-  color_scheme: "light"
-  color_schemes:
-    light:
-      primary: "#0066cc"
-      accent: "#ff6b6b"
-      text: "#333333"
-      background: "#ffffff"
-      code_background: "#f5f5f5"
-      border: "#e0e0e0"
-    dark:
-      primary: "#4dabf7"
-      accent: "#ff6b6b"
-      text: "#e0e0e0"
-      background: "#1a1a1a"
-      code_background: "#2d2d2d"
-      border: "#404040"
-
 # Custom CSS
 stylesheets:
   - assets/css/custom.css
-
-# Theme assets
-remote_theme_files:
-  - assets/css/just-the-docs.css
-  - assets/js/just-the-docs.js
-  - assets/img/favicon.ico 
