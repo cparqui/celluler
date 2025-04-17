@@ -27,4 +27,74 @@
 
 [data-theme="dark"] .task-list-item input[type="checkbox"]:hover {
     border-color: #238636;
+}
+
+/* Custom styles for Celluler documentation */
+
+/* Checkmark styling */
+.task-list-item-checkbox {
+    margin-right: 0.5em;
+}
+
+/* Light mode checkmark colors */
+[data-color-scheme="light"] .task-list-item-checkbox:checked {
+    color: #28a745;
+}
+
+/* Dark mode checkmark colors */
+[data-color-scheme="dark"] .task-list-item-checkbox:checked {
+    color: #4dabf7;
+}
+
+/* Code block styling */
+.highlight {
+    border-radius: 4px;
+    margin: 1em 0;
+}
+
+/* Table styling */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+th, td {
+    padding: 0.5em;
+    border: 1px solid var(--border);
+}
+
+th {
+    background-color: var(--code-background);
+}
+
+/* Link styling */
+a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Custom callout boxes */
+.callout {
+    padding: 1em;
+    margin: 1em 0;
+    border-radius: 4px;
+    border-left: 4px solid var(--primary);
+    background-color: var(--code-background);
+}
+
+.callout.warning {
+    border-left-color: #ff6b6b;
+}
+
+.callout.info {
+    border-left-color: #4dabf7;
+}
+
+.callout.success {
+    border-left-color: #28a745;
 } 

@@ -43,6 +43,23 @@ just_the_docs:
   nav_fold: true
   # Enable back to top button
   back_to_top: true
+  # Color scheme settings
+  color_scheme: "light"
+  color_schemes:
+    light:
+      primary: "#0066cc"
+      accent: "#ff6b6b"
+      text: "#333333"
+      background: "#ffffff"
+      code_background: "#f5f5f5"
+      border: "#e0e0e0"
+    dark:
+      primary: "#4dabf7"
+      accent: "#ff6b6b"
+      text: "#e0e0e0"
+      background: "#1a1a1a"
+      code_background: "#2d2d2d"
+      border: "#404040"
 
 # Custom CSS
 stylesheets:
