@@ -6,25 +6,39 @@
 .task-list-item input[type="checkbox"] {
     margin: 0 0.2em 0.25em -1.6em;
     vertical-align: middle;
+    opacity: 1 !important;
 }
 
 /* Custom checkmark styling */
 .task-list-item input[type="checkbox"]:checked {
-    background-color: #00ff00;
-    border-color: #00ff00;
+    background-color: #00ff00 !important;
+    border-color: #00ff00 !important;
+    opacity: 1 !important;
 }
 
 /* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
     .task-list-item input[type="checkbox"]:checked {
-        background-color: #00ff00;
-        border-color: #00ff00;
+        background-color: #00ff00 !important;
+        border-color: #00ff00 !important;
+        opacity: 1 !important;
     }
 }
 
 /* Hover effects */
 .task-list-item input[type="checkbox"]:hover {
     border-color: #00ff00;
+}
+
+/* Override disabled state */
+.task-list-item input[type="checkbox"]:disabled {
+    opacity: 1 !important;
+    cursor: default;
+}
+
+.task-list-item input[type="checkbox"]:disabled:checked {
+    background-color: #00ff00 !important;
+    border-color: #00ff00 !important;
 }
 
 /* Custom styles for Celluler documentation */
