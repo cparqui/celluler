@@ -5,6 +5,7 @@ plugins:
   - jekyll-relative-links
   - jekyll-seo-tag
   - jekyll-sitemap
+  - jekyll-remote-theme
 
 # Navigation
 nav:
@@ -62,4 +63,10 @@ just_the_docs:
 
 # Custom CSS
 stylesheets:
-  - /assets/css/custom.css 
+  - assets/css/custom.css
+
+# Theme assets
+remote_theme_files:
+  - assets/css/just-the-docs.css
+  - assets/js/just-the-docs.js
+  - assets/img/favicon.ico 

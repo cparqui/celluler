@@ -97,4 +97,7 @@ a:hover {
 
 .callout.success {
     border-left-color: #28a745;
-} 
+}
+
+/* Add any custom styles here */
+/* This file will be loaded after the theme's CSS */ 
