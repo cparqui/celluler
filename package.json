@@ -9,7 +9,9 @@
   "type": "module",
   "scripts": {
     "start": "node src/cli.js start -c cell.config.yaml",
-    "test": "jest"
+    "test": "jest",
+    "docs:build": "cd docs && bundle install && bundle exec jekyll build",
+    "docs:serve": "cd docs && bundle install && bundle exec jekyll serve"
   },
   "dependencies": {
     "commander": "^11.1.0",
