@@ -10,15 +10,15 @@ Each service follows these style guidelines:
 
 1. **File Organization**
    - One service per file
-   - File name is snake_case version of camelCase service name with .service.js suffix
+   - File name uses dot notation with .service.js suffix
    - Located in `src/services` directory
    - Test files use .service.test.js suffix
-   - Example: `example.service.js` for `ExampleService` and `example.service.test.js` for its tests
+   - Example: `nucleus.service.js` for `NucleusService` and `nucleus.service.test.js` for its tests
 
 2. **Service Definition**
-   - Service constructor accepts settings with default value
+   - Extends BaseService class
+   - Service constructor accepts broker and cellConfig
    - Service name is camelCase without "Service" suffix
-   - Extends Moleculer Service class
    - Service schema is parsed separately from super() call
 
 3. **Parameter Validation**
@@ -30,6 +30,7 @@ Each service follows these style guidelines:
    - Defined as class methods
    - Named with camelCase
    - Referenced in action definitions
+   - Use try-catch blocks for error handling
 
 5. **Event Handlers**
    - Defined as class methods
@@ -37,16 +38,15 @@ Each service follows these style guidelines:
    - Referenced in event definitions
 
 6. **Settings**
-   - Default settings defined as a constant
-   - Document all available settings
-   - Use lodash's defaultsDeep for merging settings
+   - Settings are read from cellConfig.config
+   - Document all available settings in service schema
 
 Example service structure:
 
 ```javascript
 // src/services/example.service.js
 
-import { Service } from "moleculer";
+import BaseService from './base.service.js';
 import _ from "lodash";
 
 // Parameter validation objects
@@ -66,37 +66,13 @@ const ExampleActionParams = {
     }
 };
 
-// Default settings
-const DEFAULT_SETTINGS = {
-    // Storage settings
-    storagePath: "./data/example",  // Path for service data storage
-    maxStorageSize: 1024 * 1024 * 100,  // Maximum storage size in bytes
-    
-    // Network settings
-    timeout: 5000,  // Default timeout in milliseconds
-    retryCount: 3,  // Number of retry attempts
-    
-    // Feature flags
-    enableFeatureX: false,  // Enable experimental feature X
-    enableFeatureY: true,   // Enable feature Y
-    
-    // Performance settings
-    batchSize: 100,  // Size of processing batches
-    cacheSize: 1000, // Size of in-memory cache
-    
-    // Security settings
-    requireAuth: true,  // Require authentication
-    allowedOrigins: ["*"],  // CORS allowed origins
-};
-
-export default class ExampleService extends Service {
-    constructor(broker, settings = {}) {
-        super(broker);
-
+export default class ExampleService extends BaseService {
+    constructor(broker, cellConfig) {
+        super(broker, cellConfig);
+        
         this.parseServiceSchema({
             name: "example",
-            version: 1,
-            settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
+            settings: cellConfig.config,
             dependencies: [
                 "other"
             ],
@@ -130,9 +106,14 @@ export default class ExampleService extends Service {
 
     // Action handlers
     async exampleAction(ctx) {
-        const { input, options } = ctx.params;
-        // Process input with options
-        return { result: "success" };
+        try {
+            const { input, options } = ctx.params;
+            // Process input with options
+            return { result: "success" };
+        } catch (err) {
+            this.logger.error("Action failed:", err);
+            throw err;
+        }
     }
 
     // Event handlers
@@ -655,28 +636,8 @@ export default class ConsensusService extends Service {
 
 - Keep actions focused and single-purpose
 - Use proper parameter validation
-- Handle errors gracefully
+- Handle errors gracefully with try-catch blocks
 - Document action parameters and return values
-
-```javascript
-actions: {
-    exampleAction: {
-        params: {
-            requiredField: { type: "string", min: 3 },
-            optionalField: { type: "number", optional: true }
-        },
-        async handler(ctx) {
-            try {
-                // Action logic
-                return result;
-            } catch (err) {
-                this.logger.error("Action failed:", err);
-                throw err;
-            }
-        }
-    }
-}
-```
 
 ### 2. Event Handling
 
@@ -684,27 +645,23 @@ actions: {
 - Keep event handlers idempotent
 - Document event payload structure
 
-```javascript
-events: {
-    "example.event": {
-        async handler(ctx) {
-            // Event handling logic
-        }
-    }
-}
-```
-
 ### 3. Error Handling
 
-- Use Moleculer's error types
-- Provide meaningful error messages
+- Use try-catch blocks in all action handlers
 - Log errors appropriately
+- Throw errors to propagate them up the chain
 
-```javascript
-if (!data) {
-    throw new MoleculerError("Data not found", 404, "DATA_NOT_FOUND");
-}
-```
+### 4. Logging
+
+- Use this.logger for all logging
+- Include appropriate log levels (info, debug, error)
+- Provide context in log messages
+
+### 5. Configuration
+
+- Read settings from cellConfig.config
+- Document all settings in service schema
+- Validate required settings in onCreated
 
 ## Service Testing
 

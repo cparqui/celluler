@@ -1,0 +1,64 @@
+{
+    "rules": [
+        {
+            "name": "service-file-naming",
+            "description": "Service files must use dot notation with .service.js suffix",
+            "pattern": "src/services/*.service.js",
+            "message": "Service files must use dot notation with .service.js suffix (e.g., nucleus.service.js)"
+        },
+        {
+            "name": "service-class-naming",
+            "description": "Service class names must be PascalCase with Service suffix",
+            "pattern": "class\\s+([A-Z][a-zA-Z]+)Service\\s+extends\\s+BaseService",
+            "message": "Service class names must be PascalCase with Service suffix and extend BaseService (e.g., NucleusService)"
+        },
+        {
+            "name": "parameter-validation-naming",
+            "description": "Parameter validation objects must be PascalCase with Params suffix",
+            "pattern": "const\\s+([A-Z][a-zA-Z]+)Params",
+            "message": "Parameter validation objects must be PascalCase with Params suffix (e.g., ExampleActionParams)"
+        },
+        {
+            "name": "service-constructor",
+            "description": "Service constructor must accept broker and cellConfig parameters",
+            "pattern": "constructor\\(broker,\\s*cellConfig\\)",
+            "message": "Service constructor must accept broker and cellConfig parameters"
+        },
+        {
+            "name": "service-schema",
+            "description": "Service schema must be defined using parseServiceSchema with cellConfig.config",
+            "pattern": "this\\.parseServiceSchema\\(\\{[^}]*settings:\\s*cellConfig\\.config",
+            "message": "Service schema must be defined using parseServiceSchema with cellConfig.config"
+        },
+        {
+            "name": "action-handler-naming",
+            "description": "Action handlers must be camelCase methods with try-catch blocks",
+            "pattern": "async\\s+([a-z][a-zA-Z]+)\\(ctx\\)\\s*\\{\\s*try",
+            "message": "Action handlers must be camelCase methods with try-catch blocks (e.g., exampleAction)"
+        },
+        {
+            "name": "event-handler-naming",
+            "description": "Event handlers must start with 'on' prefix and be PascalCase",
+            "pattern": "async\\s+on([A-Z][a-zA-Z]+)\\(ctx\\)",
+            "message": "Event handlers must start with 'on' prefix and be PascalCase (e.g., onExampleEvent)"
+        },
+        {
+            "name": "lifecycle-methods",
+            "description": "Service must implement lifecycle methods (onCreated, onStarted, onStopped)",
+            "pattern": "(onCreated|onStarted|onStopped)\\(\\)",
+            "message": "Service must implement lifecycle methods (onCreated, onStarted, onStopped)"
+        },
+        {
+            "name": "error-handling",
+            "description": "Actions must use try-catch blocks with error logging",
+            "pattern": "try\\s*\\{[^}]*\\}\\s*catch\\s*\\(err\\)\\s*\\{\\s*this\\.logger\\.error",
+            "message": "Actions must use try-catch blocks with error logging"
+        },
+        {
+            "name": "logging",
+            "description": "Use this.logger for all logging operations",
+            "pattern": "this\\.logger\\.(info|debug|error|warn)",
+            "message": "Use this.logger for all logging operations"
+        }
+    ]
+} 

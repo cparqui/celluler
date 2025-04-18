@@ -1,10 +1,16 @@
 import { ServiceBroker } from "moleculer";
-import NucleusService from "../../../src/services/nucleus_service.js";
+import NucleusService from "../../../src/services/nucleus.service.js";
 import _ from "lodash";
+import RAM from 'random-access-memory';
 
 describe("Test 'nucleus' service", () => {
     let broker = new ServiceBroker({ logger: false });
-    let service = new NucleusService(broker);
+    let service = new NucleusService(broker, {
+        config: {
+            storage: 'file',
+            path: './tmp/test/data'
+        }
+    });
 
     beforeAll(async () => {
         console.log('Test: beforeAll starting');
@@ -52,6 +58,18 @@ describe("Test 'nucleus' service", () => {
                 expect(err.name).toBe("ValidationError");
             }
         });
+
+        it("should reject with error for discovery key mismatch", async () => {
+            const topic = "test-topic";
+            await broker.call("nucleus.bind", { topic });
+            
+            expect.assertions(1);
+            try {
+                await broker.call("nucleus.bind", { topic, key: "invalid-key" });
+            } catch (err) {
+                expect(err.message).toContain("Discovery key mismatch");
+            }
+        });
     });
 
     describe("Test 'nucleus.get' action", () => {
@@ -79,6 +97,15 @@ describe("Test 'nucleus' service", () => {
             
             const result = await broker.call("nucleus.get", { key });
             expect(result.core.publicKey).toBe(key);
+        });
+
+        it("should handle errors when getting non-existent core", async () => {
+            expect.assertions(1);
+            try {
+                await broker.call("nucleus.get", { name: "non-existent" });
+            } catch (err) {
+                expect(err).toBeDefined();
+            }
         });
     });
 
@@ -111,6 +138,68 @@ describe("Test 'nucleus' service", () => {
             } catch (err) {
                 expect(err.name).toBe("ValidationError");
             }
+        });
+
+        it("should handle errors when writing to non-existent core", async () => {
+            expect.assertions(1);
+            try {
+                await broker.call("nucleus.write", { name: "non-existent", data: { test: "data" } });
+            } catch (err) {
+                expect(err).toBeDefined();
+            }
+        });
+    });
+
+    describe("Test service lifecycle", () => {
+        it("should handle file storage initialization", async () => {
+            const fileService = new NucleusService(broker, {
+                config: {
+                    storage: 'file',
+                    path: './tmp/test/data'
+                }
+            });
+            expect(fileService.store).toBeDefined();
+        });
+
+        it("should handle invalid storage type", async () => {
+            const invalidService = new NucleusService(broker, {
+                config: {
+                    storage: 'invalid'
+                }
+            });
+            expect(invalidService.store).toBeNull();
+        });
+
+        it("should handle initialization errors gracefully", async () => {
+            const errorService = new NucleusService(broker, {
+                config: {
+                    storage: 'file' // Missing path should cause error
+                }
+            });
+            expect(errorService.store).toBeNull();
+        });
+    });
+
+    describe("Test cleanup", () => {
+        it("should clean up resources on stop", async () => {
+            const cleanupService = new NucleusService(broker, {
+                config: {
+                    storage: 'memory',
+                    path: RAM
+                }
+            });
+            
+            // Create some cores
+            await broker.call("nucleus.bind", { topic: "cleanup-test" });
+            await broker.call("nucleus.write", { data: { test: "data" } });
+            
+            // Stop the service
+            await cleanupService.onStopped();
+            
+            // Verify cleanup
+            expect(cleanupService.cores).toEqual({});
+            expect(cleanupService.swarm).toBeUndefined();
+            expect(cleanupService.store).toBeNull();
         });
     });
 

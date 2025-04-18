@@ -1,11 +1,11 @@
 import BaseService from './base.service.js'
 import b4a from 'b4a'
-import Corestore from '../lib/corestore.js'
+import Corestore from 'corestore'
 import Hyperswarm from 'hyperswarm'
 import RAM from 'random-access-memory'
 import _ from "lodash";
 import { Service } from "moleculer";
-import { getCoreInfo } from '../lib/core_utils.js';
+import { getCoreInfo } from '../lib/core.utils.js';
 
 // Parameter validation objects
 const BindParams = {
@@ -78,7 +78,7 @@ export default class NucleusService extends BaseService {
                 this.store = new Corestore(this.settings.path);
             } else if (this.settings.storage === 'memory') {
                 this.logger.debug("Initializing Corestore with memory storage");
-                this.store = new Corestore(RAM);
+                this.store = new Corestore((filename) => new RAM());
             } else {
                 throw new Error(`Invalid storage type: ${this.settings.storage}`);
             }
