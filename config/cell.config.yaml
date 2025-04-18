@@ -1,0 +1,27 @@
+cell:
+  id: "cell-1"
+  name: "Example Cell"
+
+logging:
+  type: "Bunyan"
+  options:
+    level: "info"
+    bunyan:
+      name: "cell-1"
+      streams:
+        - level: "info"
+          path: "logs/cell-1.log"
+          type: "rotating-file"
+        - level: "error"
+          path: "logs/cell-1-error.log"
+          type: "rotating-file"
+      serializers:
+        err: "bunyan.stdSerializers.err"
+        req: "bunyan.stdSerializers.req"
+        res: "bunyan.stdSerializers.res"
+
+transporter:
+  type: "NATS"
+  options:
+    host: "localhost"
+    port: 4222 

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DEFAULT_LOG_LEVELS = {
+export const DEFAULT_LOG_LEVELS = {
     METRICS: 'warn',
     TRACING: 'warn',
     REGISTRY: 'warn',
@@ -42,10 +42,73 @@ export const DEFAULT_CONFIG = {
                 }
             }
         },
-        logging: {
-            level: DEFAULT_LOG_LEVELS,
-            output: [
-                {
+        logger: {
+            type: 'Console',
+            options: {
+                level: DEFAULT_LOG_LEVELS,
+                colors: true,
+                moduleColors: true,
+                formatter: 'full',
+                autoPadding: true
+            }
+        }
+    }
+};
+
+function resolveEnvVars(obj) {
+    if (typeof obj === 'string') {
+        // Replace ${VAR} with environment variable
+        return obj.replace(/\${([^}]+)}/g, (match, envVar) => {
+            return process.env[envVar] || match;
+        });
+    }
+    if (Array.isArray(obj)) {
+        return obj.map(item => resolveEnvVars(item));
+    }
+    if (typeof obj === 'object' && obj !== null) {
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            result[key] = resolveEnvVars(value);
+        }
+        return result;
+    }
+    return obj;
+}
+
+export async function loadConfig(configPath) {
+    try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        const config = yaml.load(configContent);
+        
+        // Handle configuration inheritance
+        let baseConfig = DEFAULT_CONFIG;
+        if (config.extends) {
+            const basePath = path.resolve(path.dirname(configPath), config.extends);
+            baseConfig = await loadConfig(basePath);
+            delete config.extends; // Remove the extends property
+        }
+        
+        // Merge with base configuration
+        const mergedConfig = _.defaultsDeep(config, baseConfig);
+        
+        // Resolve environment variables
+        const resolvedConfig = resolveEnvVars(mergedConfig);
+        
+        // Ensure logging configuration is properly set
+        if (resolvedConfig.cell.logging) {
+            // If logging.level is a string, convert it to an object with that level for all modules
+            if (typeof resolvedConfig.cell.logging.level === 'string') {
+                resolvedConfig.cell.logging.level = {
+                    "**": resolvedConfig.cell.logging.level
+                };
+            }
+            
+            // Merge with default log levels using defaultsDeep to handle nested levels
+            resolvedConfig.cell.logging.level = _.defaultsDeep({}, resolvedConfig.cell.logging.level, DEFAULT_LOG_LEVELS);
+            
+            // Ensure output array exists
+            if (!resolvedConfig.cell.logging.output) {
+                resolvedConfig.cell.logging.output = [{
                     type: 'Console',
                     options: {
                         formatter: 'full',
@@ -53,99 +116,106 @@ export const DEFAULT_CONFIG = {
                         moduleColors: false,
                         autoPadding: false
                     }
-                }
-            ]
-        }
-    }
-};
-
-export async function loadConfig(configPath) {
-    try {
-        const configContent = fs.readFileSync(configPath, 'utf8');
-        const config = yaml.load(configContent);
-        
-        // Merge with defaults, ensuring log levels are properly set
-        const mergedConfig = _.defaultsDeep(config, DEFAULT_CONFIG);
-        
-        // Ensure logging.level is properly set
-        if (typeof mergedConfig.cell.logging.level === 'string') {
-            mergedConfig.cell.logging.level = DEFAULT_LOG_LEVELS;
+                }];
+            }
         }
         
-        return mergedConfig;
+        return resolvedConfig;
     } catch (err) {
         throw new Error(`Error loading configuration: ${err.message}`);
     }
 }
 
 export function createMoleculerConfig(cellConfig, debug = false) {
-    // Create base Moleculer config
+    if (debug) {
+        console.log('Creating Moleculer config from cell config:', JSON.stringify(cellConfig, null, 2));
+    }
+
     const moleculerConfig = {
         nodeID: cellConfig.id,
         namespace: cellConfig.namespace,
-        transporter: cellConfig.transporter.type,
-        transporterOptions: cellConfig.transporter.options,
-        logger: cellConfig.logging.output.map(logger => ({
-            type: logger.type,
-            options: {
-                level: _.defaultsDeep(DEFAULT_LOG_LEVELS, logger.options.level || cellConfig.logging.level),
-                ...logger.options
-            }
-        })),
-        requestTimeout: cellConfig.performance?.requestTimeout || 5000,
-        maxCallLevel: cellConfig.performance?.maxCallLevel || 100,
-        heartbeatInterval: cellConfig.performance?.heartbeatInterval || 5,
-        heartbeatTimeout: cellConfig.performance?.heartbeatTimeout || 15,
-        registry: {
-            strategy: cellConfig.registry?.strategy || 'RoundRobin',
-            preferLocal: cellConfig.registry?.preferLocal ?? true
-        },
-        circuitBreaker: {
-            enabled: cellConfig.circuitBreaker?.enabled ?? true,
-            threshold: cellConfig.circuitBreaker?.threshold || 0.5,
-            windowTime: cellConfig.circuitBreaker?.windowTime || 60,
-            minRequestCount: cellConfig.circuitBreaker?.minRequestCount || 20,
-            halfOpenTime: cellConfig.circuitBreaker?.halfOpenTime || 10000
-        },
-        bulkhead: {
-            enabled: cellConfig.bulkhead?.enabled ?? true,
-            concurrency: cellConfig.bulkhead?.concurrency || 10,
-            maxQueueSize: cellConfig.bulkhead?.maxQueueSize || 100
-        },
-        metrics: {
-            enabled: cellConfig.metrics?.enabled ?? true,
-            reporter: cellConfig.metrics?.reporter || ['Console']
-        },
-        tracing: {
-            enabled: cellConfig.tracing?.enabled ?? true,
-            exporter: cellConfig.tracing?.exporter || ['Console']
-        },
-        cacher: {
-            type: cellConfig.cacher?.type || 'Memory',
-            options: cellConfig.cacher?.options || { max: 1000 }
-        },
-        serializer: {
-            type: cellConfig.serializer?.type || 'JSON',
-            options: cellConfig.serializer?.options || {}
-        }
+        transporter: cellConfig.transporter,
+        logger: cellConfig.logger,
+        metrics: cellConfig.metrics,
+        tracing: cellConfig.tracing,
+        hotReload: cellConfig.hotReload,
+        cacher: cellConfig.cacher,
+        serializer: cellConfig.serializer,
+        validator: cellConfig.validator,
+        errorHandler: cellConfig.errorHandler,
+        middlewares: cellConfig.middlewares,
+        replCommands: cellConfig.replCommands,
+        metadata: cellConfig.metadata,
+        maxCallLevel: cellConfig.performance?.maxCallLevel,
+        heartbeatInterval: cellConfig.performance?.heartbeatInterval,
+        heartbeatTimeout: cellConfig.performance?.heartbeatTimeout,
+        contextParamsCloning: cellConfig.contextParamsCloning,
+        tracking: cellConfig.tracking,
+        disableBalancer: cellConfig.disableBalancer,
+        registry: cellConfig.registry,
+        circuitBreaker: cellConfig.circuitBreaker,
+        bulkhead: cellConfig.bulkhead,
+        transit: cellConfig.transit,
+        apiGateway: cellConfig.apiGateway,
+        $schema: cellConfig.$schema
     };
 
     if (debug) {
-        console.log('Moleculer Configuration:');
+        console.log('Final Moleculer configuration:');
         console.log(JSON.stringify(moleculerConfig, null, 2));
     }
 
     return moleculerConfig;
 }
 
+// Service map for dynamic loading
+const SERVICE_MAP = {
+    nucleus: NucleusService,
+    // Add other services here as they are implemented
+    // message: MessageService,
+    // identity: IdentityService,
+    // state: StateService,
+    // consensus: ConsensusService
+};
+
 export async function startCell(config, debug = false) {
+    if (debug) {
+        console.log('Creating Moleculer configuration...');
+    }
     const moleculerConfig = createMoleculerConfig(config.cell, debug);
+    
+    if (debug) {
+        console.log('Moleculer configuration:', JSON.stringify(moleculerConfig, null, 2));
+    }
+
+    if (debug) {
+        console.log('Creating ServiceBroker...');
+    }
     const broker = new ServiceBroker(moleculerConfig);
 
-    // Create and add nucleus service
-    new NucleusService(broker);
+    // Get list of services to start
+    const services = _.isArray(config.cell.services) 
+        ? config.cell.services 
+        : [config.cell.services];
 
-    // Start the broker
+    if (debug) {
+        console.log('Initializing services:', services);
+    }
+
+    // Initialize each requested service
+    for (const serviceName of services) {
+        const ServiceClass = SERVICE_MAP[serviceName];
+        if (!ServiceClass) {
+            throw new Error(`Unknown service: ${serviceName}`);
+        }
+
+        if (debug) {
+            console.log(`Creating ${serviceName} service...`);
+        }
+        new ServiceClass(broker, config.cell);
+    }
+
+    console.log('Starting broker...');
     await broker.start();
     console.log(`Cell ${config.cell.id} started successfully!`);
 

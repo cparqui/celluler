@@ -1,6 +1,8 @@
+import BaseService from './base.service.js'
 import b4a from 'b4a'
-import Corestore from 'corestore'
+import Corestore from '../lib/corestore.js'
 import Hyperswarm from 'hyperswarm'
+import RAM from 'random-access-memory'
 import _ from "lodash";
 import { Service } from "moleculer";
 import { getCoreInfo } from '../lib/core_utils.js';
@@ -33,19 +35,13 @@ const WriteParams = {
     }
 };
 
-// Default settings
-const DEFAULT_SETTINGS = {
-    // Storage settings
-    storagePath: "./data",  // Path for hypercore storage
-};
-
-export default class NucleusService extends Service {
-    constructor(broker, settings = {}) {
-        super(broker);
-
+export default class NucleusService extends BaseService {
+    constructor(broker, cellConfig) {
+        super(broker, cellConfig);
+        
         this.parseServiceSchema({
             name: "nucleus",
-            settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
+            settings: cellConfig.config,
             dependencies: [],
             actions: {
                 bind: {
@@ -70,35 +66,60 @@ export default class NucleusService extends Service {
     // Lifecycle events
     onCreated() {
         this.logger.info("Nucleus service created");
-        this.logger.debug("Initializing Corestore with path:", this.settings.storagePath);
         
-        // Initialize corestore
-        this.store = new Corestore(this.settings.storagePath);
-        this.cores = {};
-        
-        // Initialize hyperswarm
-        this.logger.debug("Initializing Hyperswarm");
-        this.swarm = new Hyperswarm();
-        this.swarm.on('connection', (conn) => {
-            this.logger.debug("New Hyperswarm connection established");
-            this.store.replicate(conn);
-        });
-        this.swarm.on('error', (err) => this.logger.error(err, 'Hyperswarm error'));
+        try {
+            // Initialize corestore based on storage type
+            this.logger.debug("Initializing Corestore with storage type:", this.settings.storage);
+            if (this.settings.storage === 'file') {
+                if (!this.settings.path) {
+                    throw new Error('Path must be specified when using file storage');
+                }
+                this.logger.debug("Initializing Corestore with file storage at:", this.settings.path);
+                this.store = new Corestore(this.settings.path);
+            } else if (this.settings.storage === 'memory') {
+                this.logger.debug("Initializing Corestore with memory storage");
+                this.store = new Corestore(RAM);
+            } else {
+                throw new Error(`Invalid storage type: ${this.settings.storage}`);
+            }
+            
+            this.cores = {};
+            
+            // Initialize hyperswarm
+            this.logger.debug("Initializing Hyperswarm");
+            this.swarm = new Hyperswarm();
+            this.swarm.on('connection', (conn) => {
+                this.logger.debug("New Hyperswarm connection established");
+                this.store.replicate(conn);
+            });
+            this.swarm.on('error', (err) => this.logger.error(err, 'Hyperswarm error'));
+        } catch (err) {
+            this.logger.error("Failed to initialize Corestore:", err);
+            this.logger.warn("Service will start without storage capabilities");
+            this.store = null;
+            this.cores = {};
+        }
     }
 
     async onStarted() {
         this.logger.info("Nucleus service started");
         
-        // Initialize journal core
-        this.logger.debug("Initializing journal core");
-        this.journal = this.store.get({ name: 'journal', valueEncoding: 'json' });
-        this.cores['journal'] = this.journal;
-        await this.journal.ready();
-        this.logger.info("Journal ready:", getCoreInfo(this.journal, 'journal'));
-        
-        // Join the journal topic by default
-        this.logger.debug("Joining journal topic");
-        await this.swarm.join(this.journal.discoveryKey);
+        try {
+            // Initialize journal core
+            this.logger.debug("Initializing journal core");
+            this.journal = this.store.get({ name: 'journal', valueEncoding: 'json' });
+            this.cores['journal'] = this.journal;
+            await this.journal.ready();
+            this.logger.info("Journal ready:", getCoreInfo(this.journal, 'journal'));
+            
+            // Join the journal topic by default
+            this.logger.debug("Joining journal topic");
+            await this.swarm.join(this.journal.discoveryKey);
+        } catch (err) {
+            this.logger.error("Failed to initialize journal core:", err);
+            this.logger.warn("Service will continue without journal capabilities");
+            this.journal = null;
+        }
     }
 
     async onStopped() {

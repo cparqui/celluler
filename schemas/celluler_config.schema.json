@@ -13,198 +13,139 @@
     },
     "cell": {
       "type": "object",
-      "required": ["name", "id"],
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Human-readable cell name",
-          "default": "cell"
-        },
         "id": {
           "type": "string",
-          "description": "Unique cell identifier (maps to nodeID)",
-          "default": "cell-${process.pid}"
+          "description": "Unique identifier for the cell"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name for the cell"
         },
         "namespace": {
           "type": "string",
-          "description": "Namespace for cell grouping",
-          "default": "celluler"
+          "description": "Namespace for the cell"
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["nucleus", "message", "identity", "state", "consensus"]
+          },
+          "description": "List of services to start"
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "storage": {
+              "type": "string",
+              "enum": ["memory", "file"],
+              "description": "Storage type for services"
+            },
+            "path": {
+              "type": "string",
+              "description": "Path for file-based storage"
+            },
+            "encryption": {
+              "type": "boolean",
+              "description": "Whether to enable encryption"
+            },
+            "persistence": {
+              "type": "boolean",
+              "description": "Whether to enable persistence"
+            },
+            "replication": {
+              "type": "boolean",
+              "description": "Whether to enable replication"
+            },
+            "algorithm": {
+              "type": "string",
+              "enum": ["raft"],
+              "description": "Consensus algorithm to use"
+            }
+          }
+        },
+        "logger": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["Console", "File", "Pino", "Bunyan", "Winston", "Debug", "Log4js", "Datadog"],
+              "description": "Logger type to use"
+            },
+            {
+              "type": "boolean",
+              "description": "Use default Console logger"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["Console", "File", "Pino", "Bunyan", "Winston", "Debug", "Log4js", "Datadog"],
+                  "description": "Logger type"
+                },
+                "options": {
+                  "type": "object",
+                  "description": "Logger-specific options"
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": ["Console", "File", "Pino", "Bunyan", "Winston", "Debug", "Log4js", "Datadog"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["Console", "File", "Pino", "Bunyan", "Winston", "Debug", "Log4js", "Datadog"]
+                      },
+                      "options": {
+                        "type": "object",
+                        "description": "Logger-specific options"
+                      }
+                    },
+                    "required": ["type"]
+                  }
+                ]
+              },
+              "description": "Multiple logger configurations"
+            }
+          ],
+          "description": "Logger configuration following Moleculer's logging format"
         },
         "transporter": {
           "type": "object",
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["TCP", "nats", "redis", "mqtt"],
-              "description": "Transporter type",
-              "default": "TCP"
+              "enum": ["NATS", "TCP", "Redis", "MQTT", "AMQP", "Kafka"]
             },
             "options": {
               "type": "object",
-              "description": "Transporter-specific options",
-              "default": {
-                "port": 0,
-                "udpDiscovery": true,
-                "udpReusePort": true,
-                "udpPeriod": 30
-              }
-            }
-          },
-          "required": ["type"],
-          "default": {
-            "type": "TCP",
-            "options": {
-              "port": 0,
-              "udpDiscovery": true,
-              "udpReusePort": true,
-              "udpPeriod": 30
-            }
-          }
-        },
-        "services": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "List of services to enable",
-              "default": ["nucleus"]
-            },
-            "config": {
-              "type": "object",
-              "description": "Service-specific configurations",
-              "default": {
-                "nucleus": {
-                  "storage": "memory",
-                  "encryption": true
+              "properties": {
+                "host": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
                 }
               }
             }
           },
-          "required": ["enabled"],
-          "default": {
-            "enabled": ["nucleus"],
-            "config": {
-              "nucleus": {
-                "storage": "memory",
-                "encryption": true
-              }
-            }
-          }
-        },
-        "logging": {
-          "type": "object",
-          "properties": {
-            "level": {
-              "type": ["string", "object"],
-              "description": "Log level or module-specific log levels",
-              "default": {
-                "METRICS": "warn",
-                "TRACING": "warn",
-                "REGISTRY": "warn",
-                "DISCOVERER": "warn",
-                "TRANSIT": "warn",
-                "**": "info"
-              }
-            },
-            "output": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "required": ["type"],
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": ["Console", "File", "Pino", "Bunyan", "Winston", "Debug", "Log4js", "Datadog"],
-                    "description": "Logger type"
-                  },
-                  "options": {
-                    "type": "object",
-                    "properties": {
-                      "level": {
-                        "type": ["string", "object"],
-                        "description": "Logger-specific level override"
-                      },
-                      "formatter": {
-                        "type": "string",
-                        "enum": ["full", "short", "simple", "json"],
-                        "description": "Log formatter"
-                      },
-                      "colors": {
-                        "type": "boolean",
-                        "description": "Enable colors in console output",
-                        "default": true
-                      },
-                      "moduleColors": {
-                        "type": "boolean",
-                        "description": "Enable module-specific colors",
-                        "default": false
-                      },
-                      "autoPadding": {
-                        "type": "boolean",
-                        "description": "Auto-pad module names",
-                        "default": false
-                      },
-                      "folder": {
-                        "type": "string",
-                        "description": "Log folder path for File logger"
-                      },
-                      "filename": {
-                        "type": "string",
-                        "description": "Log filename template for File logger"
-                      },
-                      "eol": {
-                        "type": "string",
-                        "description": "End of line character",
-                        "default": "\n"
-                      },
-                      "interval": {
-                        "type": "integer",
-                        "description": "File appending interval in milliseconds",
-                        "default": 1000
-                      }
-                    }
-                  }
-                }
-              },
-              "description": "List of logger configurations",
-              "default": [
-                {
-                  "type": "Console",
-                  "options": {
-                    "formatter": "full",
-                    "colors": true,
-                    "moduleColors": false,
-                    "autoPadding": false
-                  }
-                }
-              ]
-            }
-          },
-          "required": ["level", "output"],
-          "default": {
-            "level": {
-              "METRICS": "warn",
-              "TRACING": "warn",
-              "REGISTRY": "warn",
-              "DISCOVERER": "warn",
-              "TRANSIT": "warn",
-              "**": "info"
-            },
-            "output": [
-              {
-                "type": "Console",
-                "options": {
-                  "formatter": "full",
-                  "colors": true,
-                  "moduleColors": false,
-                  "autoPadding": false
-                }
-              }
-            ]
-          }
+          "required": ["type"]
         },
         "performance": {
           "type": "object",
@@ -459,105 +400,29 @@
           "default": {}
         }
       },
-      "default": {
-        "name": "cell",
-        "id": "cell-${process.pid}",
-        "namespace": "celluler",
-        "transporter": {
-          "type": "TCP",
-          "options": {
-            "port": 0,
-            "udpDiscovery": true,
-            "udpReusePort": true,
-            "udpPeriod": 30
-          }
-        },
-        "services": {
-          "enabled": ["nucleus"],
-          "config": {
-            "nucleus": {
-              "storage": "memory",
-              "encryption": true
-            }
-          }
-        },
-        "logging": {
-          "level": {
-            "METRICS": "warn",
-            "TRACING": "warn",
-            "REGISTRY": "warn",
-            "DISCOVERER": "warn",
-            "TRANSIT": "warn",
-            "**": "info"
-          },
-          "output": [
-            {
-              "type": "Console",
-              "options": {
-                "formatter": "full",
-                "colors": true,
-                "moduleColors": false,
-                "autoPadding": false
-              }
-            }
-          ]
-        },
-        "performance": {
-          "requestTimeout": 5000,
-          "maxCallLevel": 100,
-          "heartbeatInterval": 5,
-          "heartbeatTimeout": 15
-        },
-        "security": {
-          "tls": false,
-          "auth": false,
-          "encryption": true
-        },
-        "registry": {
-          "strategy": "RoundRobin",
-          "preferLocal": true
-        },
-        "circuitBreaker": {
-          "enabled": true,
-          "threshold": 0.5,
-          "windowTime": 60,
-          "minRequestCount": 20,
-          "halfOpenTime": 10000
-        },
-        "bulkhead": {
-          "enabled": true,
-          "concurrency": 10,
-          "maxQueueSize": 100
-        },
-        "metrics": {
-          "enabled": true,
-          "reporter": ["Console"]
-        },
-        "tracing": {
-          "enabled": true,
-          "exporter": ["Console"]
-        },
-        "cacher": {
-          "type": "Memory",
-          "options": {
-            "max": 1000
-          }
-        },
-        "serializer": {
-          "type": "JSON",
-          "options": {}
-        },
-        "middlewares": [],
-        "metadata": {}
-      }
+      "required": ["id", "services", "transporter"]
     }
   },
   "default": {
     "version": 1,
     "cell": {
-      "name": "cell",
       "id": "cell-${process.pid}",
+      "name": "cell",
       "namespace": "celluler",
+      "services": ["nucleus"],
+      "config": {
+        "storage": "memory",
+        "encryption": true
+      },
+      "logger": {
+        "type": "Console",
+        "options": {
+          "level": "info",
+          "colors": true,
+          "moduleColors": false,
+          "formatter": "full"
+        }
+      },
       "transporter": {
         "type": "TCP",
         "options": {
@@ -566,36 +431,6 @@
           "udpReusePort": true,
           "udpPeriod": 30
         }
-      },
-      "services": {
-        "enabled": ["nucleus"],
-        "config": {
-          "nucleus": {
-            "storage": "memory",
-            "encryption": true
-          }
-        }
-      },
-      "logging": {
-        "level": {
-          "METRICS": "warn",
-          "TRACING": "warn",
-          "REGISTRY": "warn",
-          "DISCOVERER": "warn",
-          "TRANSIT": "warn",
-          "**": "info"
-        },
-        "output": [
-          {
-            "type": "Console",
-            "options": {
-              "formatter": "full",
-              "colors": true,
-              "moduleColors": false,
-              "autoPadding": false
-            }
-          }
-        ]
       },
       "performance": {
         "requestTimeout": 5000,

@@ -1,0 +1,52 @@
+extends: base.config.yaml
+
+cell:
+  id: cell-local-${process.pid}
+  name: cell-local
+  services: [nucleus]
+  
+  # Use TCP transport for local development
+  transporter:
+    type: TCP
+    options:
+      port: 0
+      udpDiscovery: true
+      udpReusePort: true
+      udpPeriod: 30
+
+  config:
+    storage: file
+    path: ./data
+    encryption: false
+    persistence: false
+    replication: false
+    algorithm: raft
+
+  logger:
+    - type: Console
+      options:
+        level:
+          NUCLEUS: debug
+          "**": info
+        colors: true
+        moduleColors: true
+        formatter: full
+        autoPadding: true
+    - type: File
+      options:
+        level:
+          NUCLEUS: debug
+          "**": info
+        formatter: json
+        folder: ./logs
+        filename: cell-{date}.log
+        eol: "\n"
+        interval: 1000
+
+  metrics:
+    reporter: Console
+    port: 9090
+
+  tracing:
+    enabled: true
+    exporter: Console 

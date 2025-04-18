@@ -1,0 +1,57 @@
+extends: base.config.yaml
+
+cell:
+  id: ${CELL_NAME}
+  name: ${CELL_NAME}
+  services: ${CELL_SERVICES:-nucleus}.split(',')
+  
+  # Use NATS transport for distributed deployment
+  transporter:
+    type: NATS
+    options:
+      url: ${NATS_URL}
+      reconnectTimeWait: 5
+      maxReconnectAttempts: 10
+
+  config:
+    storage: file
+    path: /data
+    encryption: true
+    persistence: true
+    replication: true
+    algorithm: raft
+
+  logger:
+    - type: Console
+      options:
+        level:
+          NUCLEUS: debug
+          "**": info
+        colors: true
+        moduleColors: true
+        formatter: full
+        autoPadding: true
+    - type: File
+      options:
+        level:
+          NUCLEUS: debug
+          "**": info
+        formatter: json
+        folder: /var/log/cell
+        filename: cell-{date}.log
+        eol: "\n"
+        interval: 1000
+    # - type: Bunyan
+    #   options:
+    #     bunyan:
+    #       name: ${CELL_NAME}
+
+  metrics:
+    reporter: Prometheus
+    port: 9090
+
+  tracing:
+    exporter: Jaeger
+    options:
+      host: jaeger
+      port: 6831 

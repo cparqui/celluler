@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # NATS server for service communication
+  nats:
+    image: nats:2
+    ports:
+      - "4222:4222"  # NATS client port
+      - "8222:8222"  # NATS monitoring port
+    command: "-js"    # Enable JetStream for persistence
+    volumes:
+      - nats-data:/data
+    networks:
+      - cell-net
+
+  # Nucleus service
+  nucleus:
+    build: .
+    environment:
+      - CELL_SERVICES=nucleus
+      - CELL_NAME=cell-nucleus
+      - NATS_URL=nats://cell:${NATS_PASSWORD:-cellpass}@nats:4222
+    depends_on:
+      - nats
+    volumes:
+      - cell-logs:/var/log/cell
+      - cell-data:/data
+    user: "1000:1000"  # Run as non-root user for security
+    networks:
+      - cell-net
+
+  # Message service
+  # message:
+  #   build: .
+  #   environment:
+  #     - CELL_SERVICES=message
+  #     - CELL_NAME=cell-message
+  #     - NATS_URL=nats://cell:${NATS_PASSWORD:-cellpass}@nats:4222
+  #   depends_on:
+  #     - nats
+  #     - nucleus
+  #   volumes:
+  #     - cell-logs:/var/log/cell
+  #     - cell-data:/data
+  #   user: "1000:1000"
+  #   networks:
+  #     - cell-net
+
+  # Identity service
+  # identity:
+  #   build: .
+  #   environment:
+  #     - CELL_SERVICES=identity
+  #     - CELL_NAME=cell-identity
+  #     - NATS_URL=nats://cell:${NATS_PASSWORD:-cellpass}@nats:4222
+  #   depends_on:
+  #     - nats
+  #     - nucleus
+  #   volumes:
+  #     - cell-logs:/var/log/cell
+  #     - cell-data:/data
+  #   user: "1000:1000"
+  #   networks:
+  #     - cell-net
+
+  # State service
+  # state:
+  #   build: .
+  #   environment:
+  #     - CELL_SERVICES=state
+  #     - CELL_NAME=cell-state
+  #     - NATS_URL=nats://cell:${NATS_PASSWORD:-cellpass}@nats:4222
+  #   depends_on:
+  #     - nats
+  #     - nucleus
+  #   volumes:
+  #     - cell-logs:/var/log/cell
+  #     - cell-data:/data
+  #   user: "1000:1000"
+  #   networks:
+  #     - cell-net
+
+  # Consensus service
+  # consensus:
+  #   build: .
+  #   environment:
+  #     - CELL_SERVICES=consensus
+  #     - CELL_NAME=cell-consensus
+  #     - NATS_URL=nats://cell:${NATS_PASSWORD:-cellpass}@nats:4222
+  #   depends_on:
+  #     - nats
+  #     - nucleus
+  #   volumes:
+  #     - cell-logs:/var/log/cell
+  #     - cell-data:/data
+  #   user: "1000:1000"
+  #   networks:
+  #     - cell-net
+
+volumes:
+  nats-data:
+  cell-logs:
+  cell-data:  # Volume for hypercore storage
+
+networks:
+  cell-net:
+    driver: bridge
+    internal: true  # Make the network private 

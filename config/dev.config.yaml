@@ -1,0 +1,31 @@
+extends: base.config.yaml
+
+cell:
+  id: cell-dev-${process.pid}
+  name: cell-dev
+  logger:
+    - type: Console
+      options:
+        level:
+          NUCLEUS: debug
+          **: info
+        colors: true
+        moduleColors: true
+        formatter: full
+        autoPadding: true
+      - type: File
+        options:
+          level:
+            NUCLEUS: debug
+            **: info
+          formatter: json
+          folder: ./logs
+          filename: cell-{date}.log
+          eol: "\n"
+          interval: 1000
+  security:
+    tls: false
+    auth: false
+    encryption: true
+  middlewares: []
+  metadata: {} 

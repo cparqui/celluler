@@ -1,0 +1,55 @@
+version: 1
+cell:
+  id: cell-${process.pid}
+  name: cell
+  namespace: celluler
+  services: [nucleus]
+  config:
+    storage: memory
+    encryption: true
+    persistence: false
+    replication: false
+    algorithm: raft
+  logger:
+    type: Console
+    options:
+      level: info
+      colors: true
+      moduleColors: true
+      formatter: full
+      autoPadding: true
+  performance:
+    requestTimeout: 5000
+    maxCallLevel: 100
+    heartbeatInterval: 5
+    heartbeatTimeout: 15
+  registry:
+    strategy: RoundRobin
+    preferLocal: true
+  circuitBreaker:
+    enabled: true
+    threshold: 0.5
+    windowTime: 60
+    minRequestCount: 20
+    halfOpenTime: 10000
+  bulkhead:
+    enabled: true
+    concurrency: 10
+    maxQueueSize: 100
+  metrics:
+    enabled: true
+    reporter: Prometheus
+    port: 9090
+  tracing:
+    enabled: false
+    exporter: Jaeger
+    options:
+      host: localhost
+      port: 6831
+  cacher:
+    type: Memory
+    options:
+      max: 1000
+  serializer:
+    type: JSON
+    options: {} 
