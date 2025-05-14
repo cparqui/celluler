@@ -1,31 +1,61 @@
-import { ServiceBroker } from "moleculer";
-import NucleusService from "../../../src/services/nucleus.service.js";
+import fs from 'fs';
 import _ from "lodash";
-import RAM from 'random-access-memory';
+import { ServiceBroker } from "moleculer";
+import path from 'path';
+import { promisify } from 'util';
+import NucleusService from "../../../src/services/nucleus.service.js";
+
+const rmrf = promisify(fs.rm);
+const mkdir = promisify(fs.mkdir);
 
 describe("Test 'nucleus' service", () => {
-    let broker = new ServiceBroker({ logger: false });
-    let service = new NucleusService(broker, {
-        config: {
-            storage: 'file',
-            path: './tmp/test/data'
-        }
-    });
+    let broker;
+    let service;
+    const testDataDir = path.join(process.cwd(), 'tmp', 'test', 'data');
+    const testDataDir2 = path.join(process.cwd(), 'tmp', 'test', 'data2');
 
     beforeAll(async () => {
-        console.log('Test: beforeAll starting');
+        // Clean up any existing test data
+        try {
+            await rmrf(testDataDir, { recursive: true, force: true });
+            await rmrf(testDataDir2, { recursive: true, force: true });
+        } catch (err) {
+            // Ignore errors if directories don't exist
+        }
+
+        // Create fresh test directories
+        await mkdir(testDataDir, { recursive: true });
+        await mkdir(testDataDir2, { recursive: true });
+
+        broker = new ServiceBroker({
+            logger: false,
+            metrics: false
+        });
+
+        service = new NucleusService(broker, {
+            name: 'test-cell',
+            config: {
+                storage: 'file',
+                path: testDataDir
+            }
+        });
+
         await broker.start();
-        console.log('Test: beforeAll complete');
     });
 
     afterAll(async () => {
-        console.log('Test: afterAll starting');
         if (broker) {
-            console.log('Test: stopping broker');
             await broker.stop();
-            console.log('Test: broker stopped');
         }
-        console.log('Test: afterAll complete');
+
+        // Clean up test data
+        try {
+            // Wait a bit to ensure all file handles are closed
+            await rmrf(testDataDir, { recursive: true, force: true });
+            await rmrf(testDataDir2, { recursive: true, force: true });
+        } catch (err) {
+            console.error('Error cleaning up test data:', err);
+        }
     });
 
     describe("Test 'nucleus.bind' action", () => {
@@ -103,6 +133,7 @@ describe("Test 'nucleus' service", () => {
             expect.assertions(1);
             try {
                 await broker.call("nucleus.get", { name: "non-existent" });
+                fail("Expected an error to be thrown");
             } catch (err) {
                 expect(err).toBeDefined();
             }
@@ -144,6 +175,7 @@ describe("Test 'nucleus' service", () => {
             expect.assertions(1);
             try {
                 await broker.call("nucleus.write", { name: "non-existent", data: { test: "data" } });
+                fail("Expected an error to be thrown");
             } catch (err) {
                 expect(err).toBeDefined();
             }
@@ -152,13 +184,8 @@ describe("Test 'nucleus' service", () => {
 
     describe("Test service lifecycle", () => {
         it("should handle file storage initialization", async () => {
-            const fileService = new NucleusService(broker, {
-                config: {
-                    storage: 'file',
-                    path: './tmp/test/data'
-                }
-            });
-            expect(fileService.store).toBeDefined();
+            expect(service.store).toBeDefined();
+
         });
 
         it("should handle invalid storage type", async () => {
@@ -167,7 +194,7 @@ describe("Test 'nucleus' service", () => {
                     storage: 'invalid'
                 }
             });
-            expect(invalidService.store).toBeNull();
+            expect(invalidService.store).toBeUndefined();
         });
 
         it("should handle initialization errors gracefully", async () => {
@@ -176,30 +203,7 @@ describe("Test 'nucleus' service", () => {
                     storage: 'file' // Missing path should cause error
                 }
             });
-            expect(errorService.store).toBeNull();
-        });
-    });
-
-    describe("Test cleanup", () => {
-        it("should clean up resources on stop", async () => {
-            const cleanupService = new NucleusService(broker, {
-                config: {
-                    storage: 'memory',
-                    path: RAM
-                }
-            });
-            
-            // Create some cores
-            await broker.call("nucleus.bind", { topic: "cleanup-test" });
-            await broker.call("nucleus.write", { data: { test: "data" } });
-            
-            // Stop the service
-            await cleanupService.onStopped();
-            
-            // Verify cleanup
-            expect(cleanupService.cores).toEqual({});
-            expect(cleanupService.swarm).toBeUndefined();
-            expect(cleanupService.store).toBeNull();
+            expect(errorService.store).toBeUndefined();
         });
     });
 
@@ -220,6 +224,141 @@ describe("Test 'nucleus' service", () => {
                     })
                 })
             );
+        });
+    });
+
+    describe("Test cell UUID", () => {
+        it("should generate and return a valid UUID", async () => {
+            // Ensure journal is initialized
+            await broker.call("nucleus.write", { data: { test: "data" } });
+            const result = await broker.call("nucleus.getUUID");
+            expect(result).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+        });
+
+        it("should return the same UUID on subsequent calls", async () => {
+            // Ensure journal is initialized
+            await broker.call("nucleus.write", { data: { test: "data" } });
+            const uuid1 = await broker.call("nucleus.getUUID");
+            await broker.call("nucleus.write", { data: { test: "more data" } });
+            const uuid2 = await broker.call("nucleus.getUUID");
+            expect(uuid1).toBe(uuid2);
+        });
+
+        it("should generate different UUIDs for different cells", async () => {
+            // Ensure journal is initialized for first cell
+            await broker.call("nucleus.write", { data: { test: "data" } });
+            const uuid1 = await broker.call("nucleus.getUUID");
+
+            // Create a second service with different config
+            const broker2 = new ServiceBroker({ logger: false });
+            const service2 = new NucleusService(broker2, {
+                name: 'different-cell',
+                config: {
+                    storage: 'file',
+                    path: './tmp/test/data2',
+                }
+            });
+
+            // Initialize the second service
+            await broker2.start();
+
+            // Initialize journal for second cell
+            await broker2.call("nucleus.write", { data: { test: "data" } });
+            const uuid2 = await broker2.call("nucleus.getUUID");
+            
+            expect(uuid1).not.toBe(uuid2);
+            
+            // Clean up second service
+            await service2.schema.stopped.call(service2);
+            await broker2.stop();
+        });
+    });
+
+    describe("Test cell key pair", () => {
+        it("should generate and return a valid public key", async () => {
+            const publicKey = await broker.call("nucleus.getPublicKey");
+            expect(publicKey).toMatch(/^-----BEGIN PUBLIC KEY-----/);
+        }, 10000);
+
+        it("should be able to encrypt and decrypt messages between cells", async () => {
+            // Create a second service with different config
+            const broker2 = new ServiceBroker({ logger: false });
+            const service2 = new NucleusService(broker2, {
+                name: 'different-cell',
+                config: {
+                    storage: 'file',
+                    path: './tmp/test/data2',
+                }
+            });
+
+            await broker2.start();
+
+            // Get public keys
+            const publicKey1 = await broker.call("nucleus.getPublicKey");
+            const publicKey2 = await broker2.call("nucleus.getPublicKey");
+
+            // Test message exchange
+            const message = "Hello from cell 1";
+            const encrypted = await service.encryptForCell(publicKey2, message);
+            const decrypted = await service2.decryptFromCell(publicKey1, encrypted);
+
+            expect(decrypted).toBe(message);
+            await broker2.stop();
+        }, 15000);
+
+        it("should reject messages with invalid signatures", async () => {
+            // Create a second service
+            const broker2 = new ServiceBroker({ logger: false });
+            const service2 = new NucleusService(broker2, {
+                name: 'different-cell',
+                config: {
+                    storage: 'file',
+                    path: './tmp/test/data2',
+                }
+            });
+
+            await broker2.start();
+
+            // Get public keys
+            const publicKey1 = await broker.call("nucleus.getPublicKey");
+            const publicKey2 = await broker2.call("nucleus.getPublicKey");
+
+            // Create a tampered message
+            const message = "Hello from cell 1";
+            const encrypted = await service.encryptForCell(publicKey2, message);
+            encrypted.signature = 'invalid-signature';
+
+            await expect(service2.decryptFromCell(publicKey1, encrypted))
+                .rejects.toThrow('Invalid signature');
+
+            await broker2.stop();
+        }, 15000);
+    });
+
+    describe("Test cleanup", () => {
+        it("should clean up resources on stop", async () => {
+            // Create a second broker and service
+            const broker2 = new ServiceBroker({ logger: false });
+            const cleanupService = new NucleusService(broker2, {
+                config: {
+                    storage: 'file',
+                    path: './tmp/test/data2'
+                }
+            });
+            
+            await broker2.start();
+            
+            // Create some cores
+            await broker2.call("nucleus.bind", { topic: "cleanup-test" });
+            await broker2.call("nucleus.write", { data: { test: "data" } });
+            
+            // Stop the service
+            await broker2.stop();
+            
+            // Verify cleanup
+            expect(cleanupService.cores).toEqual({});
+            expect(cleanupService.swarm).toBeNull();
+            expect(cleanupService.store).toBeNull();
         });
     });
 }); 

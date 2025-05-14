@@ -69,7 +69,7 @@ const ExampleActionParams = {
 export default class ExampleService extends BaseService {
     constructor(broker, cellConfig) {
         super(broker, cellConfig);
-        
+
         this.parseServiceSchema({
             name: "example",
             settings: cellConfig.config,
@@ -107,9 +107,9 @@ export default class ExampleService extends BaseService {
     // Action handlers
     async exampleAction(ctx) {
         try {
-            const { input, options } = ctx.params;
-            // Process input with options
-            return { result: "success" };
+        const { input, options } = ctx.params;
+        // Process input with options
+        return { result: "success" };
         } catch (err) {
             this.logger.error("Action failed:", err);
             throw err;

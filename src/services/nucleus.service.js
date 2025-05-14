@@ -5,7 +5,8 @@ import Hyperswarm from 'hyperswarm'
 import RAM from 'random-access-memory'
 import _ from "lodash";
 import { Service } from "moleculer";
-import { getCoreInfo } from '../lib/core.utils.js';
+import { getCoreInfo, generateCellUUID, generateKeyPair } from '../lib/core.utils.js';
+import crypto from 'crypto';
 
 // Parameter validation objects
 const BindParams = {
@@ -46,26 +47,64 @@ export default class NucleusService extends BaseService {
             actions: {
                 bind: {
                     params: BindParams,
-                    handler: this.bind
+                    handler: this.bind,
+                    rest: {
+                        method: "POST",
+                        path: "/bind"
+                    }
                 },
                 get: {
                     params: GetParams,
-                    handler: this.get
+                    handler: this.get,
+                    rest: {
+                        method: "GET",
+                        path: "/get"
+                    }
                 },
                 write: {
                     params: WriteParams,
-                    handler: this.write
+                    handler: this.write,
+                    rest: {
+                        method: "POST",
+                        path: "/write"
+                    }
+                },
+                getUUID: {
+                    handler: this.getUUID,
+                    rest: {
+                        method: "GET",
+                        path: "/uuid"
+                    }
+                },
+                getPublicKey: {
+                    handler: this.getPublicKey,
+                    rest: {
+                        method: "GET",
+                        path: "/public-key"
+                    }
                 }
             },
             created: this.onCreated,
             started: this.onStarted,
             stopped: this.onStopped,
         });
+
+        this.cellUUID = null;
+
+        // Generate key pair for the cell
+        const { publicKey, privateKey } = generateKeyPair();
+        this.publicKey = publicKey;
+        this.privateKey = privateKey;
+        this.logger.info("Generated cell key pair. Public key: \n", this.publicKey);
     }
 
     // Lifecycle events
     onCreated() {
         this.logger.info("Nucleus service created");
+    }
+
+    async onStarted() {
+        this.logger.info("Nucleus service started");
         
         try {
             // Initialize corestore based on storage type
@@ -82,80 +121,128 @@ export default class NucleusService extends BaseService {
             } else {
                 throw new Error(`Invalid storage type: ${this.settings.storage}`);
             }
-            
+            this.store.on('close', () => this.logger.info("Corestore closed."));
+            await this.store.ready().catch((err) => this.logger.error("Failed to initialize Corestore:", err));
+            this.logger.info("Corestore initialized.");
             this.cores = {};
-            
+
             // Initialize hyperswarm
-            this.logger.debug("Initializing Hyperswarm");
+            this.logger.info("Initializing Hyperswarm...");
             this.swarm = new Hyperswarm();
             this.swarm.on('connection', (conn) => {
                 this.logger.debug("New Hyperswarm connection established");
-                this.store.replicate(conn);
+                if (this.store) {
+                    this.store.replicate(conn);
+                }
             });
             this.swarm.on('error', (err) => this.logger.error(err, 'Hyperswarm error'));
+            this.logger.info("Hyperswarm initialized.");
+
+            // Initialize journal core
+            this.logger.info("Initializing journal core...");
+            this.journal = await this.store.get({ name: 'journal' });
+            await this.journal.ready().catch((err) => this.logger.error("Failed to initialize journal core:", err));
+            this.logger.debug("Journal ready:", getCoreInfo(this.journal));
+        
+            // Check if journal is empty
+            const length = await this.journal.length;
+            this.logger.debug("Journal length:", length);
+    
+            if (length === 0) {
+                // Journal is empty, generate new UUID and write to first block
+                this.logger.debug("Journal is empty, generating new UUID");
+                const timestamp = new Date().toISOString();
+                this.cellUUID = generateCellUUID(this.settings.name || 'unnamed-cell', timestamp, this.settings);
+                this.logger.debug("Generated cell UUID:", this.cellUUID);
+    
+                // Write UUID info to first block
+                const firstBlock = {
+                    name: this.settings.name || 'unnamed-cell',
+                    timestamp,
+                    uuid: this.cellUUID
+                };
+                await this.journal.append(JSON.stringify(firstBlock));
+                this.logger.debug("Wrote UUID info to first block:", firstBlock);
+            } else {
+                // Journal has blocks, read UUID from first block
+                this.logger.debug("Reading UUID from first block");
+                const firstBlock = await this.journal.get(0);
+                const blockData = JSON.parse(firstBlock.toString());
+                this.cellUUID = blockData.uuid;
+                this.logger.debug("Read UUID from first block:", this.cellUUID);
+            }
+            
+            // Join journal topic
+            this.logger.info("Joining journal topic");
+            await this.swarm.join(this.journal.discoveryKey);
+    
+            // Emit nucleus.started event
+            await this.broker.emit("nucleus.started", { 
+                cellUUID: this.cellUUID,
+                publicKey: this.publicKey
+            });    
         } catch (err) {
             this.logger.error("Failed to initialize Corestore:", err);
             this.logger.warn("Service will start without storage capabilities");
             this.store = null;
             this.cores = {};
-        }
-    }
-
-    async onStarted() {
-        this.logger.info("Nucleus service started");
-        
-        try {
-            // Initialize journal core
-            this.logger.debug("Initializing journal core");
-            this.journal = this.store.get({ name: 'journal', valueEncoding: 'json' });
-            this.cores['journal'] = this.journal;
-            await this.journal.ready();
-            this.logger.info("Journal ready:", getCoreInfo(this.journal, 'journal'));
-            
-            // Join the journal topic by default
-            this.logger.debug("Joining journal topic");
-            await this.swarm.join(this.journal.discoveryKey);
-        } catch (err) {
-            this.logger.error("Failed to initialize journal core:", err);
-            this.logger.warn("Service will continue without journal capabilities");
             this.journal = null;
         }
     }
 
     async onStopped() {
         this.logger.info("Nucleus service stopping");
-        
+
+        // Emit nucleus.stopped event
+        await this.broker.emit("nucleus.stopped", { 
+            cellUUID: this.cellUUID,
+            publicKey: this.publicKey
+        });
+
         // Close all cores
-        for (const [name, core] of Object.entries(this.cores)) {
-            try {
-                this.logger.info(`Closing core: ${name}`);
-                await core.close();
-                this.logger.info(`Closed core: ${name}`);
-            } catch (err) {
-                this.logger.error(`Error closing core ${name}:`, err);
+        if (this.cores) {
+            for (const [name, core] of Object.entries(this.cores)) {
+                try {
+                    await core.close();
+                } catch (err) {
+                    this.logger.error(`Error closing core ${name}:`, err);
+                }
             }
+            this.cores = {};
         }
 
-        // Close swarm
-        if (this.swarm) {
+        // Close journal
+        if (this.journal) {
             try {
-                this.logger.info("Destroying swarm");
+                await this.journal.close();
+            } catch (err) {
+                this.logger.error("Error closing journal:", err);
+            }
+            this.journal = null;
+        }
+
+        // Destroy swarm
+        if (this.swarm) {
+            this.logger.info("Destroying swarm");
+            try {
                 await this.swarm.destroy();
                 this.logger.info("Closed swarm");
             } catch (err) {
-                this.logger.error("Error closing swarm:", err);
+                this.logger.error("Error destroying swarm:", err);
             }
+            this.swarm = null;
         }
 
         // Close store
         if (this.store) {
+            this.logger.info("Closing store");
             try {
-                this.logger.info("Closing store");
                 await this.store.close();
                 this.logger.info("Closed store");
             } catch (err) {
                 this.logger.error("Error closing store:", err);
             }
+            this.store = null;
         }
     }
 
@@ -164,17 +251,23 @@ export default class NucleusService extends BaseService {
         const { topic, key } = ctx.params;
         
         try {
+            if (!this.store) {
+                throw new Error('Store not initialized');
+            }
+
             // No key provided, create new core with topic name
-            let core = topic in this.cores ? this.cores[topic] : await this.getCore(topic);
+            let core = _.includes(this.cores, topic) ? this.cores[topic] : await this.getCore(topic);
 
             // Key provided, verify it matches stored core
             if (key && b4a.toString(core.discoveryKey, 'hex') !== key) {
                 throw new Error(`Discovery key mismatch for topic ${topic}`);
             }
             
-            const foundPeers = core.findingPeers()
-            this.swarm.join(core.discoveryKey);
-            this.swarm.flush().then(() => foundPeers());
+            this.logger.debug({ topic }, "Joining swarm topic with discover key:", core.discoveryKey.toString('hex'));
+            const foundPeers = core.findingPeers();
+            await this.swarm.join(core.discoveryKey);
+            await this.swarm.flush();
+            foundPeers();
 
             return { 
                 success: true,
@@ -194,6 +287,10 @@ export default class NucleusService extends BaseService {
         }
 
         try {
+            if (!this.store) {
+                throw new Error('Store not initialized');
+            }
+
             const core = await this.getCore(name, key);
             return {
                 name,
@@ -209,6 +306,10 @@ export default class NucleusService extends BaseService {
         const { data, name } = ctx.params;
         
         try {
+            if (!this.store) {
+                throw new Error('Store not initialized');
+            }
+
             // Use journal if no name provided
             const core = name ? await this.getCore(name) : await this.getJournal();
 
@@ -226,18 +327,108 @@ export default class NucleusService extends BaseService {
         }
     }
 
+    async getUUID() {
+        if (!this.cellUUID) {
+            throw new Error('Cell UUID not yet generated');
+        }
+        return this.cellUUID;
+    }
+
+    async getPublicKey() {
+        this.logger.info("Getting public key:\n", this.publicKey);
+        if (!this.publicKey) {
+            throw new Error('Cell key pair not yet generated');
+        }
+        return this.publicKey;
+    }
+
     // Helper methods
     async getCore(name, key = undefined, valueEncoding = 'json') {
+        if (!this.store) {
+            throw new Error('Store not initialized');
+        }
+
         // Get or create the named core
-        const core = key? this.store.get({key, valueEncoding}): this.store.get({name, valueEncoding});
-        await core.ready();
-        this.logger.info("Hypercore ready:", getCoreInfo(core, name));
+        const core = key ? await this.store.get({ key, valueEncoding }) : await this.store.get({ name, valueEncoding });
+        
+        // Wait for core to be ready
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Core initialization timeout'));
+            }, 5000);
+
+            core.once('ready', () => {
+                clearTimeout(timeout);
+                resolve();
+            });
+        });
+
+        this.logger.debug("Hypercore ready:", getCoreInfo(core, name));
         this.cores[name] = core;
 
         return core;
     }
 
     async getJournal() {
+        if (!this.store) {
+            throw new Error('Store not initialized');
+        }
         return this.getCore('journal');
     }
+
+    // Helper methods for encryption/signing
+    async encryptForCell(targetPublicKey, message) {
+        if (!this.privateKey) {
+            throw new Error('Cell key pair not yet generated');
+        }
+        const encrypted = crypto.publicEncrypt(
+            {
+                key: targetPublicKey,
+                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                oaepHash: "sha256"
+            },
+            Buffer.from(message)
+        );
+        const signature = this.signMessage(message);
+        return {
+            encrypted: encrypted.toString('base64'),
+            signature
+        };
+    }
+
+    async decryptFromCell(sourcePublicKey, encryptedData) {
+        if (!this.privateKey) {
+            throw new Error('Cell key pair not yet generated');
+        }
+        const { encrypted, signature } = encryptedData;
+        const decrypted = crypto.privateDecrypt(
+            {
+                key: this.privateKey,
+                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                oaepHash: "sha256"
+            },
+            Buffer.from(encrypted, 'base64')
+        ).toString();
+        const isValid = this.verifySignature(decrypted, signature, sourcePublicKey);
+        if (!isValid) {
+            throw new Error('Invalid signature');
+        }
+        return decrypted;
+    }
+
+    signMessage(message) {
+        if (!this.privateKey) {
+            throw new Error('Cell key pair not yet generated');
+        }
+        const signer = crypto.createSign('SHA256');
+        signer.update(message);
+        return signer.sign(this.privateKey, 'base64');
+    }
+
+    verifySignature(message, signature, publicKey) {
+        const verifier = crypto.createVerify('SHA256');
+        verifier.update(message);
+        return verifier.verify(publicKey, signature, 'base64');
+    }
+
 } 
