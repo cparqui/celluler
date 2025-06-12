@@ -82,6 +82,13 @@ export default class NucleusService extends BaseService {
                         method: "GET",
                         path: "/public-key"
                     }
+                },
+                health: {
+                    handler: this.health,
+                    rest: {
+                        method: "GET",
+                        path: "/health"
+                    }
                 }
             },
             created: this.onCreated,
@@ -340,6 +347,31 @@ export default class NucleusService extends BaseService {
             throw new Error('Cell key pair not yet generated');
         }
         return this.publicKey;
+    }
+
+    async health() {
+        const health = {
+            status: "healthy",
+            timestamp: new Date().toISOString(),
+            cellUUID: this.cellUUID,
+            services: {
+                store: this.store ? "healthy" : "unavailable",
+                swarm: this.swarm ? "healthy" : "unavailable",
+                journal: this.journal ? "healthy" : "unavailable"
+            },
+            metrics: {
+                coresCount: this.cores ? Object.keys(this.cores).length : 0,
+                journalLength: this.journal ? await this.journal.length : 0
+            }
+        };
+
+        // Determine overall health status
+        const unhealthyServices = Object.values(health.services).filter(status => status !== "healthy");
+        if (unhealthyServices.length > 0) {
+            health.status = "degraded";
+        }
+
+        return health;
     }
 
     // Helper methods

@@ -100,6 +100,9 @@ class MessageService extends Service {
                         offset: { type: "number", optional: true, min: 0 }
                     },
                     handler: this.getMessages
+                },
+                health: {
+                    handler: this.health
                 }
             },
             events: {
@@ -220,6 +223,33 @@ class MessageService extends Service {
     async onMessageReceived(ctx) {
         const { message } = ctx.params;
         this.logger.info(`Message received from ${message.sender}:`, message);
+    }
+
+    async health(ctx) {
+        const health = {
+            status: "healthy",
+            timestamp: new Date().toISOString(),
+            services: {
+                journal: this.journal ? "healthy" : "unavailable"
+            },
+            metrics: {
+                journalLength: this.journal ? this.journal.length : 0,
+                settings: {
+                    requireSignature: this.settings.requireSignature,
+                    requireProof: this.settings.requireProof,
+                    timeout: this.settings.timeout,
+                    retryCount: this.settings.retryCount
+                }
+            }
+        };
+
+        // Determine overall health status
+        const unhealthyServices = Object.values(health.services).filter(status => status !== "healthy");
+        if (unhealthyServices.length > 0) {
+            health.status = "degraded";
+        }
+
+        return health;
     }
 }
 

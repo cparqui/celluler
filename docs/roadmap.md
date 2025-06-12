@@ -35,12 +35,12 @@
 - [x] Add test coverage reporting
 
 ### 4. Basic API Gateway
-- [ ] Set up basic API server
-- [ ] Add health check endpoints
-- [ ] Add service status endpoints
-- [ ] Add basic authentication
-- [ ] Add API documentation
-- [ ] Add rate limiting
+- [x] Set up basic API server
+- [x] Add health check endpoints
+- [x] Add service status endpoints
+- [x] Add basic authentication
+- [x] Add API documentation
+- [x] Add rate limiting
 
 ### 5. Documentation
 - [x] Add service development guidelines
