@@ -1,16 +1,18 @@
-import BaseService from './base.service.js'
-import b4a from 'b4a'
-import Corestore from 'corestore'
-import Hyperswarm from 'hyperswarm'
-import RAM from 'random-access-memory'
-import _ from "lodash";
-import { Service } from "moleculer";
+import BaseService from './base.service.js';
+import b4a from 'b4a';
+import Corestore from 'corestore';
+import Hyperswarm from 'hyperswarm';
+import RAM from 'random-access-memory';
+import _ from 'lodash';
 import { getCoreInfo, generateCellUUID, generateKeyPair } from '../lib/core.utils.js';
 import crypto from 'crypto';
 
 // Parameter validation objects
 const BindParams = {
-    topic: "string",
+    topic: {
+        type: "string",
+        min: 1
+    },
     key: {
         type: "string",
         optional: true
@@ -29,7 +31,9 @@ const GetParams = {
 };
 
 const WriteParams = {
-    data: "any",
+    data: {
+        type: "object"
+    },
     name: {
         type: "string",
         optional: true

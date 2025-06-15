@@ -53,10 +53,45 @@
 
 ### 1. Core Services (Continued)
 - [ ] MessageService
-  - [ ] Basic message routing and delivery
-  - [ ] Hypercore-based message journal
-  - [ ] Message verification
-  - [ ] Unit tests
+  - [x] Topic-based core management system
+    - [x] Implement topic→core key mapping for local organization
+    - [x] Create standard naming conventions (direct, inbox, peer_cache, journal)
+    - [x] Add core creation/binding delegation to NucleusService
+  - [ ] Direct P2P messaging (Alice→Bob separate core pattern)
+    - [ ] Implement separate read/write cores for each peer pair
+    - [ ] Add message encryption using recipient's public key
+    - [ ] Add message signing for authenticity verification
+    - [ ] Add offline message persistence and queuing
+  - [ ] Per-cell inbox system using Autobase
+    - [ ] Implement unique Autobase inbox per cell (inbox:cellUUID)
+    - [ ] Add selective write access control for trusted peers
+    - [ ] Handle message notifications and peer announcements
+    - [ ] Implement inbox access request/grant protocol
+  - [ ] Three-layer peer discovery system
+    - [ ] Layer 1: Hyperswarm discovery using common topics
+    - [ ] Layer 2: Identity handshake protocol with signature verification
+    - [ ] Layer 3: Local Hyperbee peer caching ("contact book" per cell)
+    - [ ] Add peer introduction and lookup mechanisms
+  - [ ] Identity journal integration
+    - [ ] Include journal discoveryKey in handshake messages
+    - [ ] Add journal access for identity verification
+    - [ ] Support key rotation history tracking
+    - [ ] Prepare foundation for IdentityService integration
+  - [ ] Message routing and delivery
+    - [ ] Implement delivery confirmation and retry logic
+    - [ ] Handle message ordering and deduplication
+    - [ ] Add support for offline peer message delivery
+  - [ ] Security and encryption
+    - [ ] Implement end-to-end encryption for private messages
+    - [ ] Add digital signature verification for all messages
+    - [ ] Handle trust levels and access control
+    - [ ] Add spam prevention and rate limiting
+  - [ ] Unit tests and integration tests
+    - [ ] Test topic-based core management
+    - [ ] Test direct messaging with encryption/signing
+    - [ ] Test per-cell inbox system and access control
+    - [ ] Test three-layer discovery system
+    - [ ] Test identity journal integration
 
 - [ ] IdentityService
   - [ ] Cell identity verification
