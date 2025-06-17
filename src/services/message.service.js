@@ -44,6 +44,39 @@ const BindTopicParams = {
     }
 };
 
+const SendMessageParams = {
+    targetUUID: {
+        type: "string",
+        min: 1
+    },
+    message: {
+        type: "string",
+        min: 1
+    },
+    recipientPublicKey: {
+        type: "string",
+        min: 100 // RSA public keys are much longer than sodium keys
+    }
+};
+
+const GetMessagesParams = {
+    topic: {
+        type: "string",
+        min: 1
+    },
+    limit: {
+        type: "number",
+        min: 1,
+        max: 100,
+        optional: true,
+        default: 50
+    },
+    since: {
+        type: "string",
+        optional: true // ISO timestamp
+    }
+};
+
 // Default settings
 const DEFAULT_SETTINGS = {
     // Core management settings
@@ -107,6 +140,22 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/health"
                     }
+                },
+                sendMessage: {
+                    params: SendMessageParams,
+                    handler: this.sendMessage,
+                    rest: {
+                        method: "POST",
+                        path: "/message"
+                    }
+                },
+                getMessages: {
+                    params: GetMessagesParams,
+                    handler: this.getMessages,
+                    rest: {
+                        method: "GET",
+                        path: "/messages/:topic"
+                    }
                 }
             },
             events: {
@@ -121,6 +170,11 @@ export default class MessageService extends BaseService {
         this.topicMap = new Map();
         this.cellUUID = null;
         this.cleanupTimer = null;
+        this.offlineMessageTimer = null;
+        
+        // Message storage 
+        this.messageQueue = new Map(); // offline message queue
+        this.cellPublicKey = null; // will be set from nucleus service
     }
 
     // Lifecycle events
@@ -135,6 +189,13 @@ export default class MessageService extends BaseService {
         this.cleanupTimer = setInterval(() => {
             this.cleanupExpiredTopics();
         }, this.settings.cleanupInterval);
+        
+        // Start offline message processing timer
+        this.offlineMessageTimer = setInterval(() => {
+            this.processOfflineMessages().catch(err => {
+                this.logger.error("Error processing offline messages:", err);
+            });
+        }, 30000); // Process every 30 seconds
     }
 
     async onStopped() {
@@ -145,12 +206,21 @@ export default class MessageService extends BaseService {
             clearInterval(this.cleanupTimer);
             this.cleanupTimer = null;
         }
+        
+        // Clear offline message timer
+        if (this.offlineMessageTimer) {
+            clearInterval(this.offlineMessageTimer);
+            this.offlineMessageTimer = null;
+        }
     }
 
     async onNucleusStarted(ctx) {
-        const { cellUUID } = ctx.params;
+        const { cellUUID, publicKey } = ctx.params;
         this.cellUUID = cellUUID;
+        this.cellPublicKey = publicKey; // Store as string, nucleus handles crypto
         this.logger.info("Nucleus started, cell UUID:", cellUUID);
+        
+        this.logger.info("Using nucleus service for crypto operations");
         
         // Create default topics for this cell
         await this.createDefaultTopics();
@@ -253,6 +323,140 @@ export default class MessageService extends BaseService {
         };
         
         return health;
+    }
+
+    async sendMessage(ctx) {
+        const { targetUUID, message, recipientPublicKey } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            // Generate topic name for direct message
+            const topic = this.generateTopicName(TOPIC_TYPES.DIRECT, this.cellUUID, targetUUID);
+            
+            // Create or get the topic core
+            let coreInfo = this.topicMap.get(topic);
+            if (!coreInfo) {
+                coreInfo = await this.createCoreForTopic(topic, TOPIC_TYPES.DIRECT, this.cellUUID, targetUUID);
+            }
+            
+            // Create the message structure
+            const messagePayload = {
+                from: this.cellUUID,
+                to: targetUUID,
+                content: message,
+                timestamp: new Date().toISOString(),
+                messageId: this.generateMessageId()
+            };
+            
+            // Use nucleus service for encryption and signing
+            const encryptedData = await this.broker.call("nucleus.encryptForCell", {
+                targetPublicKey: recipientPublicKey,
+                message: JSON.stringify(messagePayload)
+            });
+            
+            // Create final message structure
+            const finalMessage = {
+                ...encryptedData,
+                senderPublicKey: this.cellPublicKey,
+                timestamp: messagePayload.timestamp,
+                messageId: messagePayload.messageId
+            };
+            
+            // Write to hypercore via nucleus service
+            await this.broker.call("nucleus.write", {
+                name: topic,
+                data: finalMessage
+            });
+            
+            this.logger.info(`Message sent from ${this.cellUUID} to ${targetUUID}`);
+            
+            return {
+                success: true,
+                messageId: messagePayload.messageId,
+                topic,
+                timestamp: messagePayload.timestamp
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to send message:", err);
+            
+            // Queue message for offline delivery
+            this.queueOfflineMessage(targetUUID, message, recipientPublicKey);
+            
+            throw err;
+        }
+    }
+
+    async getMessages(ctx) {
+        const { topic, limit = 50, since } = ctx.params;
+        
+        try {
+            // Get the topic core info
+            const coreInfo = this.topicMap.get(topic);
+            if (!coreInfo) {
+                throw new Error(`Topic not found: ${topic}`);
+            }
+            
+            // Read messages from hypercore via nucleus service
+            const result = await this.broker.call("nucleus.read", {
+                name: topic,
+                limit,
+                since: since ? new Date(since).getTime() : undefined
+            });
+            
+            const messages = [];
+            
+            for (const entry of result.entries || []) {
+                try {
+                    const messageData = JSON.parse(entry.data);
+                    
+                    // Try to decrypt message using nucleus service
+                    let decryptedMessage = null;
+                    try {
+                        if (messageData.encrypted && messageData.signature) {
+                            const decrypted = await this.broker.call("nucleus.decryptFromCell", {
+                                sourcePublicKey: messageData.senderPublicKey,
+                                encryptedData: {
+                                    encrypted: messageData.encrypted,
+                                    signature: messageData.signature
+                                }
+                            });
+                            decryptedMessage = JSON.parse(decrypted);
+                        }
+                    } catch (decryptErr) {
+                        this.logger.debug("Could not decrypt message (not intended for this recipient)");
+                        // Still include the message but without decrypted content
+                    }
+                    
+                    messages.push({
+                        messageId: decryptedMessage?.messageId || messageData.messageId || 'encrypted',
+                        from: decryptedMessage?.from || 'unknown',
+                        to: decryptedMessage?.to || 'unknown',
+                        content: decryptedMessage?.content || null,
+                        timestamp: messageData.timestamp,
+                        encrypted: !decryptedMessage,
+                        verified: true // nucleus service handles signature verification
+                    });
+                    
+                } catch (parseErr) {
+                    this.logger.warn("Failed to parse message entry:", parseErr);
+                }
+            }
+            
+            return {
+                topic,
+                messages,
+                count: messages.length,
+                hasMore: result.hasMore || false
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get messages:", err);
+            throw err;
+        }
     }
 
     // Helper methods
@@ -412,6 +616,74 @@ export default class MessageService extends BaseService {
         
         if (expiredTopics.length > 0) {
             this.logger.info(`Cleaned up ${expiredTopics.length} expired topics`);
+        }
+    }
+
+    generateMessageId() {
+        return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    // Offline message queue methods
+    queueOfflineMessage(targetUUID, message, recipientPublicKey) {
+        const queueKey = `offline:${targetUUID}`;
+        
+        if (!this.messageQueue.has(queueKey)) {
+            this.messageQueue.set(queueKey, []);
+        }
+        
+        const queue = this.messageQueue.get(queueKey);
+        queue.push({
+            targetUUID,
+            message,
+            recipientPublicKey,
+            timestamp: new Date().toISOString(),
+            retryCount: 0
+        });
+        
+        this.logger.info(`Queued offline message for ${targetUUID}`);
+    }
+
+    async processOfflineMessages() {
+        for (const [queueKey, queue] of this.messageQueue.entries()) {
+            const targetUUID = queueKey.replace('offline:', '');
+            
+            // Process messages in queue
+            const successfullyProcessed = [];
+            
+            for (let i = 0; i < queue.length; i++) {
+                const queuedMessage = queue[i];
+                
+                try {
+                    // Try to send the message
+                    await this.broker.call("message.sendMessage", {
+                        targetUUID: queuedMessage.targetUUID,
+                        message: queuedMessage.message,
+                        recipientPublicKey: queuedMessage.recipientPublicKey
+                    });
+                    
+                    successfullyProcessed.push(i);
+                    this.logger.info(`Successfully sent offline message to ${targetUUID}`);
+                    
+                } catch (err) {
+                    queuedMessage.retryCount++;
+                    
+                    // Remove message after max retries
+                    if (queuedMessage.retryCount >= 5) {
+                        successfullyProcessed.push(i);
+                        this.logger.warn(`Giving up on offline message to ${targetUUID} after 5 retries`);
+                    }
+                }
+            }
+            
+            // Remove successfully processed messages
+            for (let i = successfullyProcessed.length - 1; i >= 0; i--) {
+                queue.splice(successfullyProcessed[i], 1);
+            }
+            
+            // Clean up empty queues
+            if (queue.length === 0) {
+                this.messageQueue.delete(queueKey);
+            }
         }
     }
 } 

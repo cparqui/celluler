@@ -38,7 +38,8 @@
     "moleculer": "^0.14.28",
     "moleculer-web": "^0.10.8",
     "nats": "^2.16.0",
-    "random-access-memory": "^6.2.1"
+    "random-access-memory": "^6.2.1",
+    "sodium-native": "^5.0.6"
   },
   "devDependencies": {
     "@babel/core": "^7.26.10",

@@ -73,6 +73,30 @@ export default class NucleusService extends BaseService {
                         path: "/write"
                     }
                 },
+                read: {
+                    params: {
+                        name: {
+                            type: "string",
+                            min: 1
+                        },
+                        limit: {
+                            type: "number",
+                            min: 1,
+                            max: 1000,
+                            optional: true,
+                            default: 50
+                        },
+                        since: {
+                            type: "number",
+                            optional: true
+                        }
+                    },
+                    handler: this.read,
+                    rest: {
+                        method: "GET",
+                        path: "/read/:name"
+                    }
+                },
                 getUUID: {
                     handler: this.getUUID,
                     rest: {
@@ -92,6 +116,39 @@ export default class NucleusService extends BaseService {
                     rest: {
                         method: "GET",
                         path: "/health"
+                    }
+                },
+                encryptForCell: {
+                    params: {
+                        targetPublicKey: {
+                            type: "string",
+                            min: 100
+                        },
+                        message: {
+                            type: "string",
+                            min: 1
+                        }
+                    },
+                    handler: this.encryptForCellAction,
+                    rest: {
+                        method: "POST",
+                        path: "/encrypt"
+                    }
+                },
+                decryptFromCell: {
+                    params: {
+                        sourcePublicKey: {
+                            type: "string",
+                            min: 100
+                        },
+                        encryptedData: {
+                            type: "object"
+                        }
+                    },
+                    handler: this.decryptFromCellAction,
+                    rest: {
+                        method: "POST",
+                        path: "/decrypt"
                     }
                 }
             },
@@ -338,6 +395,67 @@ export default class NucleusService extends BaseService {
         }
     }
 
+    async read(ctx) {
+        const { name, limit = 50, since } = ctx.params;
+        
+        try {
+            if (!this.store) {
+                throw new Error('Store not initialized');
+            }
+
+            const core = await this.getCore(name);
+            const coreLength = await core.length;
+            
+            // Determine start position
+            let startIndex = 0;
+            if (since) {
+                // Find the first entry after the 'since' timestamp
+                for (let i = 0; i < coreLength; i++) {
+                    try {
+                        const entry = await core.get(i);
+                        const data = JSON.parse(entry.toString());
+                        const entryTime = new Date(data.timestamp || 0).getTime();
+                        if (entryTime > since) {
+                            startIndex = i;
+                            break;
+                        }
+                    } catch (parseErr) {
+                        // Skip entries that can't be parsed
+                        continue;
+                    }
+                }
+            }
+            
+            // Read entries up to limit
+            const entries = [];
+            const endIndex = Math.min(startIndex + limit, coreLength);
+            
+            for (let i = startIndex; i < endIndex; i++) {
+                try {
+                    const entry = await core.get(i);
+                    entries.push({
+                        index: i,
+                        data: entry.toString()
+                    });
+                } catch (err) {
+                    this.logger.warn(`Failed to read entry ${i} from core ${name}:`, err);
+                }
+            }
+
+            return {
+                name,
+                entries,
+                startIndex,
+                endIndex,
+                totalLength: coreLength,
+                hasMore: endIndex < coreLength
+            };
+        } catch (err) {
+            this.logger.error("Failed to read from core:", err);  
+            throw err;
+        }
+    }
+
     async getUUID() {
         if (!this.cellUUID) {
             throw new Error('Cell UUID not yet generated');
@@ -376,6 +494,16 @@ export default class NucleusService extends BaseService {
         }
 
         return health;
+    }
+
+    async encryptForCellAction(ctx) {
+        const { targetPublicKey, message } = ctx.params;
+        return await this.encryptForCell(targetPublicKey, message);
+    }
+
+    async decryptFromCellAction(ctx) {
+        const { sourcePublicKey, encryptedData } = ctx.params;
+        return await this.decryptFromCell(sourcePublicKey, encryptedData);
     }
 
     // Helper methods
