@@ -180,7 +180,7 @@ describe("Test 'message' service", () => {
     });
 
     describe("Test topic-to-core mapping", () => {
-        describe("Test 'message.getCore' action", () => {
+        describe("Test 'message.getTopic' action", () => {
             it("should retrieve existing topic core mapping", async () => {
                 // First create a topic
                 const createParams = {
@@ -192,7 +192,7 @@ describe("Test 'message' service", () => {
                 const topic = createResult.topic;
                 
                 // Then retrieve it
-                const getResult = await broker.call("message.getCore", { topic });
+                const getResult = await broker.call("message.getTopic", { topic });
                 
                 expect(getResult.topic).toBe(topic);
                 expect(getResult.coreInfo).toBeDefined();
@@ -205,7 +205,7 @@ describe("Test 'message' service", () => {
                 
                 expect.assertions(1);
                 try {
-                    await broker.call("message.getCore", { topic });
+                    await broker.call("message.getTopic", { topic });
                 } catch (err) {
                     expect(err.message).toContain("Topic not found");
                 }
@@ -214,7 +214,7 @@ describe("Test 'message' service", () => {
             it("should reject with ValidationError for missing topic", async () => {
                 expect.assertions(1);
                 try {
-                    await broker.call("message.getCore", {});
+                    await broker.call("message.getTopic", {});
                 } catch (err) {
                     expect(err.name).toBe("ValidationError");
                 }
@@ -309,16 +309,16 @@ describe("Test 'message' service", () => {
         });
     });
 
-    describe("Test core binding delegation", () => {
-        describe("Test 'message.bindCore' action", () => {
+    describe("Test topic binding delegation", () => {
+        describe("Test 'message.bindTopic' action", () => {
             it("should bind to existing core", async () => {
                 // First create a core through NucleusService
-                const topic = "test-bind-topic";
+                const topic = "inbox:test-bind-uuid";
                 const nucleusResult = await broker.call("nucleus.bind", { topic });
                 const coreKey = nucleusResult.core.key;
                 
                 // Then bind through MessageService
-                const result = await broker.call("message.bindCore", { topic, coreKey });
+                const result = await broker.call("message.bindTopic", { topic, coreKey });
                 
                 expect(result.success).toBe(true);
                 expect(result.topic).toBe(topic);
@@ -328,9 +328,9 @@ describe("Test 'message' service", () => {
             });
 
             it("should bind without coreKey (creates new)", async () => {
-                const topic = "test-bind-new-topic";
+                const topic = "inbox:test-bind-new-uuid";
                 
-                const result = await broker.call("message.bindCore", { topic });
+                const result = await broker.call("message.bindTopic", { topic });
                 
                 expect(result.success).toBe(true);
                 expect(result.topic).toBe(topic);
@@ -340,7 +340,7 @@ describe("Test 'message' service", () => {
             it("should reject with ValidationError for missing topic", async () => {
                 expect.assertions(1);
                 try {
-                    await broker.call("message.bindCore", {});
+                    await broker.call("message.bindTopic", {});
                 } catch (err) {
                     expect(err.name).toBe("ValidationError");
                 }
@@ -387,6 +387,15 @@ describe("Test 'message' service", () => {
             const newBroker = new ServiceBroker({
                 logger: false,
                 metrics: false
+            });
+
+            // Create nucleus service first
+            const newNucleusService = new NucleusService(newBroker, {
+                name: 'test-cell-2',
+                config: {
+                    storage: 'file',
+                    path: path.join(testDataDir, 'new-cell')
+                }
             });
 
             const newMessageService = new MessageService(newBroker, {

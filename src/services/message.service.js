@@ -26,14 +26,14 @@ const CreateTopicParams = {
     }
 };
 
-const GetCoreParams = {
+const GetTopicParams = {
     topic: {
         type: "string",
         min: 1
     }
 };
 
-const BindCoreParams = {
+const BindTopicParams = {
     topic: {
         type: "string", 
         min: 1
@@ -78,17 +78,17 @@ export default class MessageService extends BaseService {
                         path: "/topic"
                     }
                 },
-                getCore: {
-                    params: GetCoreParams,
-                    handler: this.getCore,
+                getTopic: {
+                    params: GetTopicParams,
+                    handler: this.getTopic,
                     rest: {
                         method: "GET", 
-                        path: "/core/:topic"
+                        path: "/topic/:topic"
                     }
                 },
-                bindCore: {
-                    params: BindCoreParams,
-                    handler: this.bindCore,
+                bindTopic: {
+                    params: BindTopicParams,
+                    handler: this.bindTopic,
                     rest: {
                         method: "POST",
                         path: "/bind"
@@ -176,7 +176,7 @@ export default class MessageService extends BaseService {
         }
     }
 
-    async getCore(ctx) {
+    async getTopic(ctx) {
         const { topic } = ctx.params;
         
         try {
@@ -190,12 +190,12 @@ export default class MessageService extends BaseService {
                 coreInfo
             };
         } catch (err) {
-            this.logger.error("Failed to get core:", err);
+            this.logger.error("Failed to get topic:", err);
             throw err;
         }
     }
 
-    async bindCore(ctx) {
+    async bindTopic(ctx) {
         const { topic, coreKey } = ctx.params;
         
         try {
@@ -219,7 +219,7 @@ export default class MessageService extends BaseService {
                 coreInfo
             };
         } catch (err) {
-            this.logger.error("Failed to bind core:", err);
+            this.logger.error("Failed to bind topic:", err);
             throw err;
         }
     }
