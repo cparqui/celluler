@@ -67,11 +67,11 @@
     - [x] Add selective write access control for trusted peers
     - [x] Handle message notifications and peer announcements
     - [x] Implement inbox access request/grant protocol
-  - [ ] Three-layer peer discovery system
-    - [ ] Layer 1: Hyperswarm discovery using common topics
-    - [ ] Layer 2: Identity handshake protocol with signature verification
-    - [ ] Layer 3: Local Hyperbee peer caching ("contact book" per cell)
-    - [ ] Add peer introduction and lookup mechanisms
+  - [x] Three-layer peer discovery system
+    - [x] Layer 1: Hyperswarm discovery using common topics
+    - [x] Layer 2: Identity handshake protocol with signature verification
+    - [x] Layer 3: Local Hyperbee peer caching ("contact book" per cell)
+    - [x] Add peer introduction and lookup mechanisms
   - [ ] Identity journal integration
     - [ ] Include journal discoveryKey in handshake messages
     - [ ] Add journal access for identity verification

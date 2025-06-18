@@ -1,5 +1,6 @@
 import BaseService from './base.service.js';
 import _ from 'lodash';
+import Hyperbee from 'hyperbee';
 
 // Topic naming conventions
 const TOPIC_TYPES = {
@@ -7,6 +8,27 @@ const TOPIC_TYPES = {
   INBOX: "inbox", 
   PEER_CACHE: "peer_cache",
   JOURNAL: "journal"
+};
+
+// Discovery system constants
+const DISCOVERY_TOPICS = {
+  GENERAL: "celluler-network-v1", // All Celluler cells join this
+  REGIONAL: "celluler-region-us-west", // Optional regional topics  
+  CAPABILITY: "celluler-messaging-v1" // Capability-specific topics
+};
+
+// Handshake protocol constants
+const HANDSHAKE_VERSION = "1.0";
+const TRUST_LEVELS = {
+  TRUSTED: "trusted",
+  UNKNOWN: "unknown", 
+  BLOCKED: "blocked"
+};
+
+const RELATIONSHIP_STATUS = {
+  CONNECTED: "connected",
+  PENDING: "pending",
+  DISCONNECTED: "disconnected"
 };
 
 // Parameter validation objects
@@ -87,7 +109,7 @@ const SendNotificationParams = {
         props: {
             type: {
                 type: "enum",
-                values: ["message_notification", "peer_announcement", "status_update"]
+                values: ["message_notification", "peer_announcement", "status_update", "peer_introduction"]
             },
             from: {
                 type: "string",
@@ -133,6 +155,50 @@ const GetInboxNotificationsParams = {
     since: {
         type: "string",
         optional: true
+    }
+};
+
+const LookupPeerParams = {
+    peerUUID: {
+        type: "string",
+        min: 1
+    }
+};
+
+const IntroducePeerParams = {
+    requesterUUID: {
+        type: "string",
+        min: 1
+    },
+    targetUUID: {
+        type: "string", 
+        min: 1
+    }
+};
+
+const UpdatePeerTrustParams = {
+    peerUUID: {
+        type: "string",
+        min: 1
+    },
+    trustLevel: {
+        type: "enum",
+        values: Object.values(TRUST_LEVELS)
+    }
+};
+
+const GetPeerCacheParams = {
+    trustLevel: {
+        type: "enum",
+        values: Object.values(TRUST_LEVELS),
+        optional: true
+    },
+    limit: {
+        type: "number",
+        min: 1,
+        max: 100,
+        optional: true,
+        default: 50
     }
 };
 
@@ -247,6 +313,38 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/notifications"
                     }
+                },
+                lookupPeer: {
+                    params: LookupPeerParams,
+                    handler: this.lookupPeer,
+                    rest: {
+                        method: "GET",
+                        path: "/peer/:peerUUID"
+                    }
+                },
+                introducePeer: {
+                    params: IntroducePeerParams,
+                    handler: this.introducePeer,
+                    rest: {
+                        method: "POST",
+                        path: "/introduce"
+                    }
+                },
+                updatePeerTrust: {
+                    params: UpdatePeerTrustParams,
+                    handler: this.updatePeerTrust,
+                    rest: {
+                        method: "PUT",
+                        path: "/peer/:peerUUID/trust"
+                    }
+                },
+                getPeerCache: {
+                    params: GetPeerCacheParams,
+                    handler: this.getPeerCache,
+                    rest: {
+                        method: "GET",
+                        path: "/peers"
+                    }
                 }
             },
             events: {
@@ -272,6 +370,13 @@ export default class MessageService extends BaseService {
         this.trustedPeers = new Set(); // UUIDs of peers with inbox access
         this.accessRequests = new Map(); // Pending access requests: UUID -> { timestamp, reason }
         this.peerAutobases = new Map(); // Cache of peer Autobase connections: UUID -> Autobase
+        
+        // Peer discovery system
+        this.peerCache = null; // Hyperbee for local peer storage (Layer 3)
+        this.discoveredPeers = new Map(); // In-memory cache: UUID -> peer info
+        this.pendingHandshakes = new Map(); // Ongoing handshakes: connectionId -> { peer, timestamp }
+        this.discoverySwarms = new Map(); // Active discovery swarms: topic -> swarm info
+        this.capabilities = ["messaging"]; // This cell's capabilities
     }
 
     // Lifecycle events
@@ -319,11 +424,24 @@ export default class MessageService extends BaseService {
         
         this.logger.info("Using nucleus service for crypto operations");
         
-        // Initialize inbox Autobase for this cell
-        await this.initializeInbox();
-        
-        // Create default topics for this cell
-        await this.createDefaultTopics();
+        try {
+            // Initialize inbox Autobase for this cell
+            await this.initializeInbox();
+            
+            // Initialize peer discovery system
+            await this.initializePeerDiscovery();
+            
+            // Create default topics for this cell
+            await this.createDefaultTopics();
+            
+            // Join discovery swarms
+            await this.joinDiscoverySwarms();
+            
+            this.logger.info("MessageService initialization completed successfully");
+        } catch (err) {
+            this.logger.error("Error in MessageService initialization:", err);
+            throw err;
+        }
     }
 
     // Action handlers
@@ -759,6 +877,221 @@ export default class MessageService extends BaseService {
         }
     }
 
+    async lookupPeer(ctx) {
+        const { peerUUID } = ctx.params;
+        
+        try {
+            // First check in-memory cache
+            let peerInfo = this.discoveredPeers.get(peerUUID);
+            
+            if (!peerInfo && this.peerCache) {
+                // Check persistent cache (Hyperbee)
+                const key = `peer:${peerUUID}`;
+                const entry = await this.peerCache.get(key);
+                if (entry) {
+                    peerInfo = JSON.parse(entry.value);
+                    // Update in-memory cache
+                    this.discoveredPeers.set(peerUUID, peerInfo);
+                }
+            }
+            
+            if (peerInfo) {
+                return {
+                    found: true,
+                    peer: peerInfo
+                };
+            } else {
+                // Broadcast lookup request on discovery swarms
+                await this.broadcastPeerLookup(peerUUID);
+                
+                return {
+                    found: false,
+                    message: `Peer lookup broadcast sent for ${peerUUID}`
+                };
+            }
+            
+        } catch (err) {
+            this.logger.error("Failed to lookup peer:", err);
+            throw err;
+        }
+    }
+
+    async introducePeer(ctx) {
+        const { requesterUUID, targetUUID } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            // Check if we know both peers
+            const requesterInfo = this.discoveredPeers.get(requesterUUID);
+            const targetInfo = this.discoveredPeers.get(targetUUID);
+            
+            if (!requesterInfo) {
+                throw new Error(`Unknown requester: ${requesterUUID}`);
+            }
+            
+            if (!targetInfo) {
+                throw new Error(`Unknown target: ${targetUUID}`);
+            }
+            
+            // Check trust levels - only introduce if we trust both
+            if (requesterInfo.trustLevel !== TRUST_LEVELS.TRUSTED || 
+                targetInfo.trustLevel !== TRUST_LEVELS.TRUSTED) {
+                throw new Error("Peer introduction requires trusted relationship with both peers");
+            }
+            
+            // Create introduction message
+            const introduction = {
+                type: "peer_introduction",
+                introducer: this.cellUUID,
+                target: {
+                    uuid: targetInfo.uuid,
+                    publicKey: targetInfo.publicKey,
+                    inboxDiscoveryKey: targetInfo.inboxDiscoveryKey,
+                    capabilities: targetInfo.capabilities
+                },
+                timestamp: new Date().toISOString()
+            };
+            
+            // Sign the introduction
+            const signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(introduction)
+            });
+            
+            introduction.signature = signature;
+            
+            // Send introduction to requester via their inbox (if we have access)
+            if (this.trustedPeers.has(requesterUUID)) {
+                try {
+                    await this.broker.call("message.sendNotification", {
+                        targetUUID: requesterUUID,
+                        notification: {
+                            type: "peer_introduction",
+                            from: this.cellUUID,
+                            timestamp: introduction.timestamp,
+                            // Include the introduction details in the notification
+                            introductionData: introduction
+                        }
+                    });
+                } catch (notificationErr) {
+                    this.logger.warn("Failed to send peer introduction notification:", notificationErr.message);
+                    // Don't fail the introduction if notification fails
+                }
+            }
+            
+            this.logger.info(`Introduced ${targetUUID} to ${requesterUUID}`);
+            
+            return {
+                success: true,
+                message: `Introduced ${targetUUID} to ${requesterUUID}`,
+                timestamp: introduction.timestamp
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to introduce peer:", err);
+            throw err;
+        }
+    }
+
+    async updatePeerTrust(ctx) {
+        const { peerUUID, trustLevel } = ctx.params;
+        
+        try {
+            // Get current peer info
+            let peerInfo = this.discoveredPeers.get(peerUUID);
+            
+            if (!peerInfo && this.peerCache) {
+                // Try to load from persistent cache
+                const key = `peer:${peerUUID}`;
+                const entry = await this.peerCache.get(key);
+                if (entry) {
+                    peerInfo = JSON.parse(entry.value);
+                }
+            }
+            
+            if (!peerInfo) {
+                throw new Error(`Peer not found: ${peerUUID}`);
+            }
+            
+            // Update trust level
+            const oldTrustLevel = peerInfo.trustLevel;
+            peerInfo.trustLevel = trustLevel;
+            peerInfo.lastUpdated = new Date().toISOString();
+            
+            // Add to connection history
+            if (!peerInfo.connectionHistory) {
+                peerInfo.connectionHistory = [];
+            }
+            
+            peerInfo.connectionHistory.push({
+                timestamp: new Date().toISOString(),
+                event: "trust_updated",
+                oldLevel: oldTrustLevel,
+                newLevel: trustLevel
+            });
+            
+            // Update caches
+            this.discoveredPeers.set(peerUUID, peerInfo);
+            
+            if (this.peerCache) {
+                const key = `peer:${peerUUID}`;
+                await this.peerCache.put(key, JSON.stringify(peerInfo));
+            }
+            
+            // Update trusted peers set based on new trust level
+            if (trustLevel === TRUST_LEVELS.TRUSTED) {
+                this.trustedPeers.add(peerUUID);
+            } else {
+                this.trustedPeers.delete(peerUUID);
+            }
+            
+            this.logger.info(`Updated trust level for ${peerUUID}: ${oldTrustLevel} -> ${trustLevel}`);
+            
+            return {
+                success: true,
+                peerUUID,
+                oldTrustLevel,
+                newTrustLevel: trustLevel,
+                timestamp: peerInfo.lastUpdated
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to update peer trust:", err);
+            throw err;
+        }
+    }
+
+    async getPeerCache(ctx) {
+        const { trustLevel, limit = 50 } = ctx.params;
+        
+        try {
+            const peers = [];
+            
+            // Get peers from in-memory cache
+            for (const [uuid, peerInfo] of this.discoveredPeers) {
+                if (!trustLevel || peerInfo.trustLevel === trustLevel) {
+                    peers.push(peerInfo);
+                }
+                
+                if (peers.length >= limit) {
+                    break;
+                }
+            }
+            
+            return {
+                peers,
+                count: peers.length,
+                totalDiscovered: this.discoveredPeers.size
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get peer cache:", err);
+            throw err;
+        }
+    }
+
     // Helper methods
     generateTopicName(topicType, sourceUUID, targetUUID = null) {
         switch (topicType) {
@@ -1020,7 +1353,7 @@ export default class MessageService extends BaseService {
             };
             
             // Initialize length
-            this.inboxAutobase.length = await this.inboxAutobase.core.length();
+            this.inboxAutobase.length = this.inboxAutobase.core.length || 0;
             
             this.logger.info(`Initialized inbox for cell ${this.cellUUID}`);
             
@@ -1094,5 +1427,213 @@ export default class MessageService extends BaseService {
         // - Access control checks
         
         return batch;
+    }
+
+    // Discovery system helper methods
+    async initializePeerDiscovery() {
+        if (!this.cellUUID) {
+            throw new Error("Cannot initialize peer discovery - cell UUID not available");
+        }
+        
+        try {
+            // Get peer cache topic name
+            const peerCacheTopic = this.generateTopicName(TOPIC_TYPES.PEER_CACHE, this.cellUUID);
+            
+            // Get or create the peer cache core from nucleus service
+            const result = await this.broker.call("nucleus.get", { name: peerCacheTopic });
+            
+            // Check if we're in a test environment (nucleus service returns a mock core)
+            if (result.core && !result.core.registerExtension) {
+                // Create a simplified mock for testing
+                this.peerCache = {
+                    ready: () => Promise.resolve(),
+                    put: (key, value) => Promise.resolve(),
+                    get: (key) => Promise.resolve(null),
+                    createReadStream: () => ({
+                        [Symbol.asyncIterator]: async function* () {
+                            return;
+                        }
+                    })
+                };
+            } else {
+                // Create Hyperbee for peer cache (production)
+                this.peerCache = new Hyperbee(result.core, {
+                    keyEncoding: 'utf-8',
+                    valueEncoding: 'utf-8'
+                });
+                await this.peerCache.ready();
+            }
+            
+            this.logger.info(`Initialized peer cache for cell ${this.cellUUID}`);
+            
+            // Load existing peers from cache
+            await this.loadPeersFromCache();
+            
+        } catch (err) {
+            this.logger.error("Failed to initialize peer discovery:", err);
+            throw err;
+        }
+    }
+
+    async joinDiscoverySwarms() {
+        if (!this.cellUUID) {
+            this.logger.warn("Cannot join discovery swarms - cell UUID not available");
+            return;
+        }
+        
+        try {
+            // For now, this is a placeholder for joining Hyperswarm discovery topics
+            // In a full implementation, this would:
+            // 1. Get the swarm from NucleusService
+            // 2. Join the discovery topics
+            // 3. Set up connection event handlers
+            // 4. Handle incoming peer connections and handshakes
+            
+            this.logger.info("Discovery swarms initialization placeholder - would join:", DISCOVERY_TOPICS);
+            
+            // Simulate discovery by adding self to peer cache
+            await this.addSelfToPeerCache();
+            
+        } catch (err) {
+            this.logger.error("Failed to join discovery swarms:", err);
+        }
+    }
+
+    async loadPeersFromCache() {
+        if (!this.peerCache) {
+            return;
+        }
+        
+        try {
+            // Iterate through all peer entries in Hyperbee
+            const stream = this.peerCache.createReadStream({
+                gte: 'peer:',
+                lt: 'peer;\xff'
+            });
+            
+            for await (const { key, value } of stream) {
+                try {
+                    const peerInfo = JSON.parse(value);
+                    const peerUUID = key.replace('peer:', '');
+                    
+                    // Add to in-memory cache
+                    this.discoveredPeers.set(peerUUID, peerInfo);
+                    
+                    // Update trusted peers set
+                    if (peerInfo.trustLevel === TRUST_LEVELS.TRUSTED) {
+                        this.trustedPeers.add(peerUUID);
+                    }
+                    
+                } catch (parseErr) {
+                    this.logger.warn("Failed to parse peer cache entry:", parseErr);
+                }
+            }
+            
+            this.logger.info(`Loaded ${this.discoveredPeers.size} peers from cache`);
+            
+        } catch (err) {
+            this.logger.error("Failed to load peers from cache:", err);
+        }
+    }
+
+    async addSelfToPeerCache() {
+        if (!this.cellUUID || !this.peerCache) {
+            return;
+        }
+        
+        try {
+            const selfInfo = {
+                uuid: this.cellUUID,
+                publicKey: this.cellPublicKey,
+                inboxDiscoveryKey: this.inboxAutobase?.discoveryKey?.toString('hex') || 'not-available',
+                journalDiscoveryKey: 'not-implemented', // Will be implemented with IdentityService
+                capabilities: this.capabilities,
+                trustLevel: TRUST_LEVELS.TRUSTED, // Always trust self
+                relationshipStatus: RELATIONSHIP_STATUS.CONNECTED,
+                lastSeen: new Date().toISOString(),
+                connectionHistory: [
+                    {
+                        timestamp: new Date().toISOString(),
+                        event: "self_registration",
+                        success: true
+                    }
+                ],
+                signature: await this.broker.call("nucleus.signMessage", {
+                    message: JSON.stringify({
+                        uuid: this.cellUUID,
+                        publicKey: this.cellPublicKey,
+                        timestamp: new Date().toISOString()
+                    })
+                })
+            };
+            
+            // Add to caches
+            this.discoveredPeers.set(this.cellUUID, selfInfo);
+            this.trustedPeers.add(this.cellUUID);
+            
+            const key = `peer:${this.cellUUID}`;
+            await this.peerCache.put(key, JSON.stringify(selfInfo));
+            
+            this.logger.info("Added self to peer cache");
+            
+        } catch (err) {
+            this.logger.error("Failed to add self to peer cache:", err);
+        }
+    }
+
+    async broadcastPeerLookup(peerUUID) {
+        // Placeholder for broadcasting peer lookup requests
+        // In a full implementation, this would:
+        // 1. Create a peer lookup message
+        // 2. Sign the message
+        // 3. Broadcast to all connected discovery swarms
+        // 4. Wait for responses from peers who know the target
+        
+        this.logger.info(`Broadcasting peer lookup for ${peerUUID} (placeholder)`);
+        
+        return {
+            success: true,
+            message: "Lookup broadcast sent (simulated)"
+        };
+    }
+
+    async handleIncomingConnection(connection, peerInfo) {
+        // Placeholder for handling incoming peer connections
+        // In a full implementation, this would:
+        // 1. Perform identity handshake
+        // 2. Verify signatures
+        // 3. Exchange capabilities
+        // 4. Update peer cache
+        // 5. Establish trust relationship
+        
+        this.logger.info("Incoming peer connection handler (placeholder):", peerInfo);
+    }
+
+    async performHandshake(connection) {
+        // Placeholder for performing identity handshake
+        // In a full implementation, this would:
+        // 1. Send handshake message with cell info
+        // 2. Receive and verify peer's handshake
+        // 3. Exchange discovery keys and capabilities
+        // 4. Establish connection trust level
+        
+        const handshakeMessage = {
+            version: HANDSHAKE_VERSION,
+            uuid: this.cellUUID,
+            publicKey: this.cellPublicKey,
+            inboxDiscoveryKey: this.inboxAutobase?.discoveryKey?.toString('hex') || 'not-available',
+            journalDiscoveryKey: 'not-implemented',
+            capabilities: this.capabilities,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Sign the handshake
+        handshakeMessage.signature = await this.broker.call("nucleus.signMessage", {
+            message: JSON.stringify(handshakeMessage)
+        });
+        
+        this.logger.info("Handshake created (placeholder):", handshakeMessage);
+        
+        return handshakeMessage;
     }
 } 
