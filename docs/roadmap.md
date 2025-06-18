@@ -57,11 +57,11 @@
     - [x] Implement topic→core key mapping for local organization
     - [x] Create standard naming conventions (direct, inbox, peer_cache, journal)
     - [x] Add core creation/binding delegation to NucleusService
-  - [ ] Direct P2P messaging (Alice→Bob separate core pattern)
-    - [ ] Implement separate read/write cores for each peer pair
-    - [ ] Add message encryption using recipient's public key
-    - [ ] Add message signing for authenticity verification
-    - [ ] Add offline message persistence and queuing
+  - [x] Direct P2P messaging (Alice→Bob separate core pattern)
+    - [x] Implement separate read/write cores for each peer pair
+    - [x] Add message encryption using recipient's public key
+    - [x] Add message signing for authenticity verification
+    - [x] Add offline message persistence and queuing
   - [ ] Per-cell inbox system using Autobase
     - [ ] Implement unique Autobase inbox per cell (inbox:cellUUID)
     - [ ] Add selective write access control for trusted peers
