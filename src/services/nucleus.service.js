@@ -150,6 +150,19 @@ export default class NucleusService extends BaseService {
                         method: "POST",
                         path: "/decrypt"
                     }
+                },
+                signMessage: {
+                    params: {
+                        message: {
+                            type: "string",
+                            min: 1
+                        }
+                    },
+                    handler: this.signMessageAction,
+                    rest: {
+                        method: "POST",
+                        path: "/sign"
+                    }
                 }
             },
             created: this.onCreated,
@@ -504,6 +517,11 @@ export default class NucleusService extends BaseService {
     async decryptFromCellAction(ctx) {
         const { sourcePublicKey, encryptedData } = ctx.params;
         return await this.decryptFromCell(sourcePublicKey, encryptedData);
+    }
+
+    async signMessageAction(ctx) {
+        const { message } = ctx.params;
+        return this.signMessage(message);
     }
 
     // Helper methods

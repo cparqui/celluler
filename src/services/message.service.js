@@ -77,6 +77,65 @@ const GetMessagesParams = {
     }
 };
 
+const SendNotificationParams = {
+    targetUUID: {
+        type: "string",
+        min: 1
+    },
+    notification: {
+        type: "object",
+        props: {
+            type: {
+                type: "enum",
+                values: ["message_notification", "peer_announcement", "status_update"]
+            },
+            from: {
+                type: "string",
+                min: 1
+            },
+            timestamp: {
+                type: "string"
+            }
+        }
+    }
+};
+
+const RequestInboxAccessParams = {
+    targetUUID: {
+        type: "string",
+        min: 1
+    },
+    reason: {
+        type: "string",
+        min: 1,
+        optional: true
+    }
+};
+
+const GrantInboxAccessParams = {
+    requesterUUID: {
+        type: "string",
+        min: 1
+    },
+    granted: {
+        type: "boolean"
+    }
+};
+
+const GetInboxNotificationsParams = {
+    limit: {
+        type: "number",
+        min: 1,
+        max: 100,
+        optional: true,
+        default: 50
+    },
+    since: {
+        type: "string",
+        optional: true
+    }
+};
+
 // Default settings
 const DEFAULT_SETTINGS = {
     // Core management settings
@@ -156,6 +215,38 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/messages/:topic"
                     }
+                },
+                sendNotification: {
+                    params: SendNotificationParams,
+                    handler: this.sendNotification,
+                    rest: {
+                        method: "POST",
+                        path: "/notification"
+                    }
+                },
+                requestInboxAccess: {
+                    params: RequestInboxAccessParams,
+                    handler: this.requestInboxAccess,
+                    rest: {
+                        method: "POST",
+                        path: "/request-access"
+                    }
+                },
+                grantInboxAccess: {
+                    params: GrantInboxAccessParams,
+                    handler: this.grantInboxAccess,
+                    rest: {
+                        method: "POST",
+                        path: "/grant-access"
+                    }
+                },
+                getInboxNotifications: {
+                    params: GetInboxNotificationsParams,
+                    handler: this.getInboxNotifications,
+                    rest: {
+                        method: "GET",
+                        path: "/notifications"
+                    }
                 }
             },
             events: {
@@ -175,6 +266,12 @@ export default class MessageService extends BaseService {
         // Message storage 
         this.messageQueue = new Map(); // offline message queue
         this.cellPublicKey = null; // will be set from nucleus service
+        
+        // Inbox management
+        this.inboxAutobase = null; // Autobase for this cell's inbox
+        this.trustedPeers = new Set(); // UUIDs of peers with inbox access
+        this.accessRequests = new Map(); // Pending access requests: UUID -> { timestamp, reason }
+        this.peerAutobases = new Map(); // Cache of peer Autobase connections: UUID -> Autobase
     }
 
     // Lifecycle events
@@ -221,6 +318,9 @@ export default class MessageService extends BaseService {
         this.logger.info("Nucleus started, cell UUID:", cellUUID);
         
         this.logger.info("Using nucleus service for crypto operations");
+        
+        // Initialize inbox Autobase for this cell
+        await this.initializeInbox();
         
         // Create default topics for this cell
         await this.createDefaultTopics();
@@ -373,6 +473,26 @@ export default class MessageService extends BaseService {
             
             this.logger.info(`Message sent from ${this.cellUUID} to ${targetUUID}`);
             
+            // Try to send notification to recipient's inbox if we have access
+            try {
+                if (this.trustedPeers.has(targetUUID)) {
+                    await this.broker.call("message.sendNotification", {
+                        targetUUID,
+                        notification: {
+                            type: "message_notification",
+                            from: this.cellUUID,
+                            to: targetUUID,
+                            topic,
+                            coreKey: coreInfo.coreKey,
+                            messageId: messagePayload.messageId
+                        }
+                    });
+                }
+            } catch (notificationErr) {
+                this.logger.warn("Failed to send message notification:", notificationErr);
+                // Don't fail the whole message send if notification fails
+            }
+            
             return {
                 success: true,
                 messageId: messagePayload.messageId,
@@ -455,6 +575,186 @@ export default class MessageService extends BaseService {
             
         } catch (err) {
             this.logger.error("Failed to get messages:", err);
+            throw err;
+        }
+    }
+
+    async sendNotification(ctx) {
+        const { targetUUID, notification } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            // Ensure we have permission to write to target's inbox
+            if (!this.trustedPeers.has(targetUUID)) {
+                throw new Error(`No inbox access granted for peer: ${targetUUID}`);
+            }
+            
+            // Get the target peer's inbox Autobase
+            let targetAutobase = this.peerAutobases.get(targetUUID);
+            if (!targetAutobase) {
+                // Connect to target's inbox
+                targetAutobase = await this.connectToPeerInbox(targetUUID);
+                if (!targetAutobase) {
+                    throw new Error("Peer inbox connection not fully implemented");
+                }
+            }
+            
+            // Sign the notification
+            const notificationToSign = {
+                ...notification,
+                from: this.cellUUID,
+                timestamp: new Date().toISOString()
+            };
+            
+            const signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(notificationToSign)
+            });
+            
+            const signedNotification = {
+                ...notificationToSign,
+                signature
+            };
+            
+            // Write notification to target's inbox
+            await targetAutobase.append(JSON.stringify(signedNotification));
+            
+            this.logger.info(`Notification sent to ${targetUUID}: ${notification.type}`);
+            
+            return {
+                success: true,
+                targetUUID,
+                notificationType: notification.type,
+                timestamp: notificationToSign.timestamp
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to send notification:", err);
+            throw err;
+        }
+    }
+
+    async requestInboxAccess(ctx) {
+        const { targetUUID, reason } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            // Create access request notification
+            const accessRequest = {
+                type: "access_request",
+                from: this.cellUUID,
+                to: targetUUID,
+                reason: reason || "Requesting inbox access for peer communication",
+                timestamp: new Date().toISOString(),
+                publicKey: this.cellPublicKey
+            };
+            
+            // For now, we'll store the request locally and try to send it
+            // In a full implementation, this would go through the discovery system
+            this.logger.info(`Access request created for ${targetUUID}: ${accessRequest.reason}`);
+            
+            return {
+                success: true,
+                targetUUID,
+                requestTimestamp: accessRequest.timestamp,
+                status: "pending"
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to request inbox access:", err);
+            throw err;
+        }
+    }
+
+    async grantInboxAccess(ctx) {
+        const { requesterUUID, granted } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            if (granted) {
+                // Add to trusted peers
+                this.trustedPeers.add(requesterUUID);
+                
+                // Add requester as writer to our inbox Autobase
+                if (this.inboxAutobase) {
+                    // In a real implementation, we would get the requester's public key
+                    // and add them as a writer. For now, we'll just track the trust.
+                    this.logger.info(`Granted inbox access to ${requesterUUID}`);
+                }
+                
+                // Remove from pending requests
+                this.accessRequests.delete(requesterUUID);
+                
+                return {
+                    success: true,
+                    requesterUUID,
+                    granted: true,
+                    timestamp: new Date().toISOString()
+                };
+            } else {
+                // Deny access
+                this.accessRequests.delete(requesterUUID);
+                this.logger.info(`Denied inbox access to ${requesterUUID}`);
+                
+                return {
+                    success: true,
+                    requesterUUID,
+                    granted: false,
+                    timestamp: new Date().toISOString()
+                };
+            }
+            
+        } catch (err) {
+            this.logger.error("Failed to grant/deny inbox access:", err);
+            throw err;
+        }
+    }
+
+    async getInboxNotifications(ctx) {
+        const { limit = 50, since } = ctx.params;
+        
+        if (!this.inboxAutobase) {
+            throw new Error("Inbox not initialized");
+        }
+        
+        try {
+            const notifications = [];
+            const sinceTime = since ? new Date(since).getTime() : 0;
+            
+            // Read from our inbox Autobase
+            const length = await this.inboxAutobase.length;
+            const startIndex = Math.max(0, length - limit);
+            
+            for (let i = startIndex; i < length; i++) {
+                try {
+                    const entry = await this.inboxAutobase.get(i);
+                    const notification = JSON.parse(entry.toString());
+                    
+                    const notificationTime = new Date(notification.timestamp).getTime();
+                    if (notificationTime >= sinceTime) {
+                        notifications.push(notification);
+                    }
+                } catch (parseErr) {
+                    this.logger.warn("Failed to parse notification entry:", parseErr);
+                }
+            }
+            
+            return {
+                notifications,
+                count: notifications.length,
+                hasMore: startIndex > 0
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get inbox notifications:", err);
             throw err;
         }
     }
@@ -685,5 +985,114 @@ export default class MessageService extends BaseService {
                 this.messageQueue.delete(queueKey);
             }
         }
+    }
+
+    // Inbox helper methods
+    async initializeInbox() {
+        if (!this.cellUUID) {
+            throw new Error("Cannot initialize inbox - cell UUID not available");
+        }
+        
+        try {
+            // Get inbox topic name
+            const inboxTopic = this.generateTopicName(TOPIC_TYPES.INBOX, this.cellUUID);
+            
+            // Get or create the inbox core from nucleus service
+            const result = await this.broker.call("nucleus.get", { name: inboxTopic });
+            
+            // For now, use a simplified approach - just store the core info
+            // In production, this would be a proper Autobase setup
+            this.inboxAutobase = {
+                core: result.core,
+                length: 0,
+                discoveryKey: result.core.discoveryKey,
+                async append(data) {
+                    // Simplified append - just increment length
+                    this.length++;
+                    this.core.append(data);
+                },
+                async get(index) {
+                    return this.core.get(index);
+                },
+                async ready() {
+                    return this.core.ready();
+                }
+            };
+            
+            // Initialize length
+            this.inboxAutobase.length = await this.inboxAutobase.core.length();
+            
+            this.logger.info(`Initialized inbox for cell ${this.cellUUID}`);
+            
+            // Add our own announcement to the inbox
+            await this.sendSelfAnnouncement();
+            
+        } catch (err) {
+            this.logger.error("Failed to initialize inbox:", err);
+            throw err;
+        }
+    }
+
+    async connectToPeerInbox(peerUUID) {
+        try {
+            // For now, this is a simplified implementation
+            // In a full implementation, we would:
+            // 1. Look up peer's inbox discovery key from peer cache
+            // 2. Connect to their Autobase using the discovery key
+            // 3. Handle the multi-writer setup properly
+            
+            // Simplified placeholder - return null for now
+            this.logger.warn(`Peer inbox connection not fully implemented for ${peerUUID}`);
+            return null;
+            
+        } catch (err) {
+            this.logger.error(`Failed to connect to peer inbox ${peerUUID}:`, err);
+            throw err;
+        }
+    }
+
+    async sendSelfAnnouncement() {
+        if (!this.inboxAutobase || !this.cellUUID) {
+            return;
+        }
+        
+        try {
+            const announcement = {
+                type: "peer_announcement",
+                uuid: this.cellUUID,
+                publicKey: this.cellPublicKey,
+                inboxDiscoveryKey: this.inboxAutobase.discoveryKey?.toString('hex') || 'not-available',
+                capabilities: ["messaging"],
+                timestamp: new Date().toISOString()
+            };
+            
+            // Sign the announcement
+            const signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(announcement)
+            });
+            
+            const signedAnnouncement = {
+                ...announcement,
+                signature
+            };
+            
+            await this.inboxAutobase.append(JSON.stringify(signedAnnouncement));
+            this.logger.info(`Sent self-announcement to inbox`);
+            
+        } catch (err) {
+            this.logger.error("Failed to send self-announcement:", err);
+        }
+    }
+
+    async applyInboxEntry(batch, clocks, change) {
+        // This is called by Autobase to apply entries to the inbox
+        // For now, we'll just return the data as-is
+        // In a full implementation, this would handle:
+        // - Entry validation
+        // - Signature verification
+        // - Spam filtering
+        // - Access control checks
+        
+        return batch;
     }
 } 
