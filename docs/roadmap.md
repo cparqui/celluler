@@ -62,11 +62,11 @@
     - [x] Add message encryption using recipient's public key
     - [x] Add message signing for authenticity verification
     - [x] Add offline message persistence and queuing
-  - [ ] Per-cell inbox system using Autobase
-    - [ ] Implement unique Autobase inbox per cell (inbox:cellUUID)
-    - [ ] Add selective write access control for trusted peers
-    - [ ] Handle message notifications and peer announcements
-    - [ ] Implement inbox access request/grant protocol
+  - [x] Per-cell inbox system using Autobase
+    - [x] Implement unique Autobase inbox per cell (inbox:cellUUID)
+    - [x] Add selective write access control for trusted peers
+    - [x] Handle message notifications and peer announcements
+    - [x] Implement inbox access request/grant protocol
   - [ ] Three-layer peer discovery system
     - [ ] Layer 1: Hyperswarm discovery using common topics
     - [ ] Layer 2: Identity handshake protocol with signature verification
