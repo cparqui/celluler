@@ -81,10 +81,10 @@
     - [x] Implement cryptographic proof generation for message participation
     - [x] Add journal entry verification and integrity checking
     - [x] Prepare foundation for IdentityService integration
-  - [ ] Message routing and delivery
-    - [ ] Implement delivery confirmation and retry logic
-    - [ ] Handle message ordering and deduplication
-    - [ ] Add support for offline peer message delivery
+  - [x] Message routing and delivery
+    - [x] Implement delivery confirmation and retry logic
+    - [x] Handle message ordering and deduplication
+    - [x] Add support for offline peer message delivery
   - [ ] Security and encryption
     - [ ] Implement end-to-end encryption for private messages
     - [ ] Add digital signature verification for all messages

@@ -1439,4 +1439,241 @@ wIDAQAB
             });
         });
     });
+
+    describe("Message Routing and Delivery", () => {
+        beforeEach(async () => {
+            // Ensure service is properly initialized
+            const service = broker.getLocalService("message");
+            expect(service.cellUUID).toBeDefined();
+            expect(service.cellPublicKey).toBeDefined();
+        });
+
+        describe("Enhanced Message Sending", () => {
+            it("should send enhanced message with delivery tracking", async () => {
+                const targetUUID = "test-target-uuid";
+                const recipientPublicKey = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1vx7agoebGcQSuuPiLJX\nZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tS\noc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt\n7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0\nzgdLR_o1hiabtAjOcvjsyb3JnYXLovpDgjH16CjCDY1dQkrhwIGg8LCWfLUYmRKV\nMjjNmUBG8xh3CtbKWPyCwfJgNI_R7O6pXLJgPnMc8uxJRaBFOGjw8q_SZfCKS1fH\n-----END PUBLIC KEY-----";
+
+                const result = await broker.call("message.sendEnhancedMessage", {
+                    targetUUID,
+                    message: "Test enhanced message",
+                    recipientPublicKey,
+                    options: {
+                        requireDeliveryConfirmation: true,
+                        priority: "normal",
+                        expiresIn: 3600
+                    }
+                });
+
+                expect(result.success).toBe(true);
+                expect(result.messageId).toMatch(/^msg_\d+_[a-z0-9]+$/);
+                expect(["sent", "pending"]).toContain(result.status); // Can be either sent or pending for retry
+                expect(result.sequenceNumber).toBe(1);
+                expect(result.expiresAt).toBeDefined();
+            });
+
+            it("should handle message send failure with retry queue", async () => {
+                const targetUUID = "offline-target-uuid";
+                const recipientPublicKey = "invalid-public-key";
+
+                try {
+                    await broker.call("message.sendEnhancedMessage", {
+                        targetUUID,
+                        message: "Test message",
+                        recipientPublicKey
+                    });
+                } catch (err) {
+                    expect(err.message).toBeDefined();
+                }
+            });
+        });
+
+        describe("Message Status Tracking", () => {
+            it("should track message status lifecycle", async () => {
+                const service = broker.getLocalService("message");
+                const messageId = "test-message-123";
+                
+                // Create test metadata
+                const metadata = {
+                    messageId,
+                    from: service.cellUUID,
+                    to: "target-uuid",
+                    status: "sent",
+                    sentAt: new Date().toISOString(),
+                    deliveredAt: null,
+                    confirmedAt: null,
+                    retryCount: 0,
+                    expiresAt: new Date(Date.now() + 3600000).toISOString(),
+                    sequenceNumber: 1,
+                    priority: "normal"
+                };
+
+                service.messageMetadata.set(messageId, metadata);
+
+                const result = await broker.call("message.getMessageStatus", {
+                    messageId
+                });
+
+                expect(result.messageId).toBe(messageId);
+                expect(result.status).toBe("sent");
+                expect(result.timeline).toBeDefined();
+                expect(result.sequenceNumber).toBe(1);
+                expect(result.priority).toBe("normal");
+            });
+
+            it("should reject status request for non-existent message", async () => {
+                try {
+                    await broker.call("message.getMessageStatus", {
+                        messageId: "non-existent-message"
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Message not found");
+                }
+            });
+        });
+
+        describe("Message Confirmation", () => {
+            it("should confirm message receipt", async () => {
+                const service = broker.getLocalService("message");
+                const messageId = "test-confirm-123";
+                
+                // Create test metadata
+                const metadata = {
+                    messageId,
+                    from: "sender-uuid",
+                    to: service.cellUUID,
+                    status: "sent",
+                    sentAt: new Date().toISOString(),
+                    deliveredAt: null,
+                    confirmedAt: null,
+                    topic: "direct:sender-uuid:recipient-uuid"
+                };
+
+                service.messageMetadata.set(messageId, metadata);
+
+                const result = await broker.call("message.confirmMessage", {
+                    messageId,
+                    received: true,
+                    processed: true
+                });
+
+                expect(result.success).toBe(true);
+                expect(result.messageId).toBe(messageId);
+                expect(result.status).toBe("confirmed");
+                expect(result.confirmed.received).toBe(true);
+                expect(result.confirmed.processed).toBe(true);
+            });
+        });
+
+        describe("Delivery Statistics", () => {
+            it("should track delivery statistics", async () => {
+                const result = await broker.call("message.getDeliveryStats");
+
+                expect(result).toHaveProperty('totalSent');
+                expect(result).toHaveProperty('totalDelivered');
+                expect(result).toHaveProperty('totalFailed');
+                expect(result).toHaveProperty('totalPending');
+                expect(result).toHaveProperty('averageDeliveryTime');
+                expect(result).toHaveProperty('deliveryRate');
+                expect(result).toHaveProperty('retryRate');
+            });
+        });
+
+        describe("Message Ordering", () => {
+            it("should assign sequence numbers to messages", () => {
+                const service = broker.getLocalService("message");
+                const channel = service.getChannelKey("alice", "bob");
+
+                const seq1 = service.getNextSequenceNumber(channel);
+                const seq2 = service.getNextSequenceNumber(channel);
+                const seq3 = service.getNextSequenceNumber(channel);
+
+                expect(seq1).toBe(1);
+                expect(seq2).toBe(2);
+                expect(seq3).toBe(3);
+            });
+
+            it("should detect out-of-order messages", () => {
+                const service = broker.getLocalService("message");
+                const channel = "test-channel";
+
+                const inOrderMessage = { sequenceNumber: 1 };
+                const futureMessage = { sequenceNumber: 3 };
+                const duplicateMessage = { sequenceNumber: 1 };
+
+                expect(service.shouldBufferMessage(inOrderMessage, channel)).toBe(false);
+                expect(service.shouldBufferMessage(futureMessage, channel)).toBe(true);
+                
+                // Advance expected sequence
+                service.messageBuffers.get(channel).expectedNextSequence = 2;
+                expect(service.shouldBufferMessage(duplicateMessage, channel)).toBe(false);
+            });
+        });
+
+        describe("Message Deduplication", () => {
+            it("should detect duplicate messages", () => {
+                const service = broker.getLocalService("message");
+                const messageId = "test-duplicate-123";
+                const checksum = "test-checksum";
+
+                expect(service.isDuplicate(messageId, checksum)).toBe(false);
+                expect(service.isDuplicate(messageId, checksum)).toBe(true);
+            });
+
+            it("should clean up old deduplication entries", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add old entry
+                const oldMessageId = "old-message";
+                service.deduplicationCache.set(oldMessageId, Date.now() - (25 * 60 * 60 * 1000)); // 25 hours ago
+
+                service.cleanupDeduplicationCache();
+
+                expect(service.deduplicationCache.has(oldMessageId)).toBe(false);
+            });
+        });
+
+        describe("Peer Status Tracking", () => {
+            it("should update peer status", () => {
+                const service = broker.getLocalService("message");
+                const peerUUID = "test-peer";
+
+                service.updatePeerStatus(peerUUID, "online");
+
+                const status = service.peerStatus.get(peerUUID);
+                expect(status.status).toBe("online");
+                expect(status.lastSeen).toBeDefined();
+                expect(status.lastStatusUpdate).toBeDefined();
+            });
+        });
+
+        describe("Retry Logic", () => {
+            it("should calculate exponential backoff delays", () => {
+                const service = broker.getLocalService("message");
+
+                const delay1 = service.calculateNextRetryTime("EXPONENTIAL", 0);
+                const delay2 = service.calculateNextRetryTime("EXPONENTIAL", 1);
+                const delay3 = service.calculateNextRetryTime("EXPONENTIAL", 2);
+
+                expect(delay1).toBeGreaterThanOrEqual(750); // 1000ms ± 25% jitter
+                expect(delay1).toBeLessThanOrEqual(1250);
+                expect(delay2).toBeGreaterThanOrEqual(1500); // 2000ms ± 25% jitter
+                expect(delay2).toBeLessThanOrEqual(2500);
+                expect(delay3).toBeGreaterThanOrEqual(3000); // 4000ms ± 25% jitter
+                expect(delay3).toBeLessThanOrEqual(5000);
+            });
+
+            it("should use fixed delays for immediate strategy", () => {
+                const service = broker.getLocalService("message");
+
+                const delay1 = service.calculateNextRetryTime("IMMEDIATE", 0);
+                const delay2 = service.calculateNextRetryTime("IMMEDIATE", 1);
+                const delay3 = service.calculateNextRetryTime("IMMEDIATE", 2);
+
+                expect(delay1).toBe(0);
+                expect(delay2).toBe(1000);
+                expect(delay3).toBe(2000);
+            });
+        });
+    });
 }); 

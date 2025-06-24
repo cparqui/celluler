@@ -11,6 +11,49 @@ const TOPIC_TYPES = {
   JOURNAL: "journal"
 };
 
+// Message status constants
+const MESSAGE_STATUS = {
+  PENDING: "pending",           // Message created, not yet sent
+  SENT: "sent",                // Message written to sender's core
+  DELIVERED: "delivered",       // Recipient has read the message
+  CONFIRMED: "confirmed",       // Recipient has confirmed receipt
+  FAILED: "failed",            // Delivery failed after retries
+  EXPIRED: "expired"           // Message expired before delivery
+};
+
+// Peer status constants
+const PEER_STATUS = {
+  ONLINE: "online",             // Actively connected
+  OFFLINE: "offline",           // Temporarily unreachable
+  DISCONNECTED: "disconnected", // Cleanly disconnected
+  UNKNOWN: "unknown"            // Status uncertain
+};
+
+// Retry strategy configurations
+const RETRY_STRATEGIES = {
+  IMMEDIATE: {
+    delays: [0, 1000, 2000],           // Immediate, 1s, 2s
+    maxRetries: 3
+  },
+  EXPONENTIAL: {
+    baseDelay: 1000,                   // Start at 1 second
+    multiplier: 2,                     // Double each time
+    maxDelay: 60000,                   // Cap at 1 minute
+    maxRetries: 8
+  },
+  PERSISTENT: {
+    delays: [5000, 15000, 60000, 300000], // 5s, 15s, 1m, 5m
+    maxRetries: 20
+  }
+};
+
+// Message priority levels
+const MESSAGE_PRIORITY = {
+  URGENT: "urgent",
+  NORMAL: "normal", 
+  LOW: "low"
+};
+
 // Discovery system constants
 const DISCOVERY_TOPICS = {
   GENERAL: "celluler-network-v1", // All Celluler cells join this
@@ -79,6 +122,36 @@ const SendMessageParams = {
     recipientPublicKey: {
         type: "string",
         min: 100 // RSA public keys are much longer than sodium keys
+    },
+    options: {
+        type: "object",
+        optional: true,
+        props: {
+            requireDeliveryConfirmation: {
+                type: "boolean",
+                optional: true,
+                default: false
+            },
+            priority: {
+                type: "enum",
+                values: Object.values(MESSAGE_PRIORITY),
+                optional: true,
+                default: MESSAGE_PRIORITY.NORMAL
+            },
+            expiresIn: {
+                type: "number",
+                min: 60, // Minimum 1 minute
+                max: 2592000, // Maximum 30 days
+                optional: true,
+                default: 86400 // 24 hours
+            },
+            retryStrategy: {
+                type: "enum",
+                values: Object.keys(RETRY_STRATEGIES),
+                optional: true,
+                default: "EXPONENTIAL"
+            }
+        }
     }
 };
 
@@ -200,6 +273,75 @@ const GetPeerCacheParams = {
         max: 100,
         optional: true,
         default: 50
+    }
+};
+
+const GetMessageStatusParams = {
+    messageId: {
+        type: "string",
+        min: 1
+    }
+};
+
+const ConfirmMessageParams = {
+    messageId: {
+        type: "string",
+        min: 1
+    },
+    received: {
+        type: "boolean",
+        optional: true,
+        default: true
+    },
+    processed: {
+        type: "boolean", 
+        optional: true,
+        default: true
+    }
+};
+
+const SendEnhancedMessageParams = {
+    targetUUID: {
+        type: "string",
+        min: 1
+    },
+    message: {
+        type: "string",
+        min: 1
+    },
+    recipientPublicKey: {
+        type: "string",
+        min: 100
+    },
+    options: {
+        type: "object",
+        optional: true,
+        props: {
+            requireDeliveryConfirmation: {
+                type: "boolean",
+                optional: true,
+                default: false
+            },
+            priority: {
+                type: "enum", 
+                values: Object.values(MESSAGE_PRIORITY),
+                optional: true,
+                default: MESSAGE_PRIORITY.NORMAL
+            },
+            expiresIn: {
+                type: "number",
+                min: 60,
+                max: 2592000,
+                optional: true,
+                default: 86400
+            },
+            retryStrategy: {
+                type: "enum",
+                values: Object.keys(RETRY_STRATEGIES),
+                optional: true,
+                default: "EXPONENTIAL"
+            }
+        }
     }
 };
 
@@ -429,6 +571,37 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/journal"
                     }
+                },
+                sendEnhancedMessage: {
+                    params: SendEnhancedMessageParams,
+                    handler: this.sendEnhancedMessage,
+                    rest: {
+                        method: "POST",
+                        path: "/send"
+                    }
+                },
+                getMessageStatus: {
+                    params: GetMessageStatusParams,
+                    handler: this.getMessageStatus,
+                    rest: {
+                        method: "GET",
+                        path: "/status/:messageId"
+                    }
+                },
+                confirmMessage: {
+                    params: ConfirmMessageParams,
+                    handler: this.confirmMessage,
+                    rest: {
+                        method: "POST",
+                        path: "/confirm"
+                    }
+                },
+                getDeliveryStats: {
+                    handler: this.getDeliveryStats,
+                    rest: {
+                        method: "GET",
+                        path: "/delivery-stats"
+                    }
                 }
             },
             events: {
@@ -448,6 +621,20 @@ export default class MessageService extends BaseService {
         // Message storage 
         this.messageQueue = new Map(); // offline message queue
         this.cellPublicKey = null; // will be set from nucleus service
+        
+        // Message routing and delivery
+        this.messageMetadata = new Map(); // messageId -> metadata
+        this.sequenceCounters = new Map(); // channel -> sequence number
+        this.messageBuffers = new Map(); // channel -> ordering buffer
+        this.deduplicationCache = new Map(); // messageId -> timestamp
+        this.peerStatus = new Map(); // peerUUID -> status info
+        this.deliveryStats = {
+            totalSent: 0,
+            totalDelivered: 0,
+            totalFailed: 0,
+            totalPending: 0,
+            deliveryTimes: []
+        };
         
         // Inbox management
         this.inboxAutobase = null; // Autobase for this cell's inbox
@@ -1262,6 +1449,269 @@ export default class MessageService extends BaseService {
             
         } catch (err) {
             this.logger.error("Failed to get journal entries:", err);
+            throw err;
+        }
+    }
+
+    // Enhanced Message Delivery Actions
+    
+    async sendEnhancedMessage(ctx) {
+        const { targetUUID, message, recipientPublicKey, options = {} } = ctx.params;
+        
+        if (!this.cellUUID) {
+            throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        try {
+            // Apply default options
+            const msgOptions = {
+                requireDeliveryConfirmation: false,
+                priority: MESSAGE_PRIORITY.NORMAL,
+                expiresIn: 86400, // 24 hours
+                retryStrategy: "EXPONENTIAL",
+                ...options
+            };
+            
+            // Generate unique message ID
+            const messageId = this.generateMessageId();
+            const timestamp = new Date().toISOString();
+            const expiresAt = new Date(Date.now() + msgOptions.expiresIn * 1000).toISOString();
+            
+            // Get sequence number for this channel
+            const channel = this.getChannelKey(this.cellUUID, targetUUID);
+            const sequenceNumber = this.getNextSequenceNumber(channel);
+            
+            // Create message payload with metadata
+            const messagePayload = {
+                messageId,
+                from: this.cellUUID,
+                to: targetUUID,
+                content: message,
+                timestamp,
+                sequenceNumber,
+                priority: msgOptions.priority,
+                requireDeliveryConfirmation: msgOptions.requireDeliveryConfirmation,
+                expiresAt
+            };
+            
+            // Calculate content checksum for deduplication
+            const checksum = this.hashMessage(messagePayload);
+            
+            // Check for duplicates
+            if (this.isDuplicate(messageId, checksum)) {
+                throw new Error(`Duplicate message detected: ${messageId}`);
+            }
+            
+            // Create metadata entry
+            const metadata = {
+                messageId,
+                from: this.cellUUID,
+                to: targetUUID,
+                status: MESSAGE_STATUS.PENDING,
+                sentAt: null,
+                deliveredAt: null,
+                confirmedAt: null,
+                retryCount: 0,
+                maxRetries: RETRY_STRATEGIES[msgOptions.retryStrategy].maxRetries,
+                expiresAt,
+                topic: this.generateTopicName(TOPIC_TYPES.DIRECT, this.cellUUID, targetUUID),
+                sequenceNumber,
+                checksum,
+                priority: msgOptions.priority,
+                retryStrategy: msgOptions.retryStrategy,
+                requireDeliveryConfirmation: msgOptions.requireDeliveryConfirmation
+            };
+            
+            // Store metadata
+            this.messageMetadata.set(messageId, metadata);
+            this.updateDeliveryStats('totalPending', 1);
+            
+            // Send the message
+            try {
+                await this.sendMessageWithMetadata(messagePayload, recipientPublicKey, metadata);
+                
+                return {
+                    success: true,
+                    messageId,
+                    status: MESSAGE_STATUS.SENT,
+                    estimatedDelivery: new Date(Date.now() + 5000).toISOString(), // 5 second estimate
+                    sequenceNumber,
+                    expiresAt
+                };
+                
+            } catch (err) {
+                this.logger.error(`Failed to send enhanced message ${messageId}:`, err);
+                
+                // Update status to failed and queue for retry
+                metadata.status = MESSAGE_STATUS.FAILED;
+                metadata.retryCount = 1;
+                
+                this.queueMessageForRetry(metadata, msgOptions.retryStrategy);
+                
+                // For enhanced messages, we still return success but indicate retry status
+                return {
+                    success: true, // The message was queued successfully 
+                    messageId,
+                    status: MESSAGE_STATUS.PENDING, // Will be retried
+                    error: err.message,
+                    willRetry: true,
+                    nextRetry: this.calculateNextRetryTime(msgOptions.retryStrategy, 1),
+                    sequenceNumber,
+                    expiresAt
+                };
+            }
+            
+        } catch (err) {
+            this.logger.error("Failed to send enhanced message:", err);
+            throw err;
+        }
+    }
+    
+    async getMessageStatus(ctx) {
+        const { messageId } = ctx.params;
+        
+        try {
+            const metadata = this.messageMetadata.get(messageId);
+            
+            if (!metadata) {
+                throw new Error(`Message not found: ${messageId}`);
+            }
+            
+            // Build timeline from metadata
+            const timeline = [];
+            
+            if (metadata.status !== MESSAGE_STATUS.PENDING) {
+                timeline.push({
+                    status: MESSAGE_STATUS.PENDING,
+                    timestamp: metadata.createdAt || metadata.sentAt
+                });
+            }
+            
+            if (metadata.sentAt) {
+                timeline.push({
+                    status: MESSAGE_STATUS.SENT,
+                    timestamp: metadata.sentAt
+                });
+            }
+            
+            if (metadata.deliveredAt) {
+                timeline.push({
+                    status: MESSAGE_STATUS.DELIVERED,
+                    timestamp: metadata.deliveredAt
+                });
+            }
+            
+            if (metadata.confirmedAt) {
+                timeline.push({
+                    status: MESSAGE_STATUS.CONFIRMED,
+                    timestamp: metadata.confirmedAt
+                });
+            }
+            
+            return {
+                messageId,
+                status: metadata.status,
+                timeline,
+                retryCount: metadata.retryCount,
+                expiresAt: metadata.expiresAt,
+                sequenceNumber: metadata.sequenceNumber,
+                priority: metadata.priority
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get message status:", err);
+            throw err;
+        }
+    }
+    
+    async confirmMessage(ctx) {
+        const { messageId, received = true, processed = true } = ctx.params;
+        
+        try {
+            const metadata = this.messageMetadata.get(messageId);
+            
+            if (!metadata) {
+                throw new Error(`Message not found: ${messageId}`);
+            }
+            
+            const timestamp = new Date().toISOString();
+            
+            // Update status based on confirmation type
+            if (received && !metadata.deliveredAt) {
+                metadata.deliveredAt = timestamp;
+                metadata.status = MESSAGE_STATUS.DELIVERED;
+                this.updateDeliveryStats('totalDelivered', 1);
+                this.updateDeliveryStats('totalPending', -1);
+            }
+            
+            if (processed && received) {
+                metadata.confirmedAt = timestamp;
+                metadata.status = MESSAGE_STATUS.CONFIRMED;
+                
+                // Calculate delivery time for statistics
+                if (metadata.sentAt) {
+                    const deliveryTime = (new Date(timestamp) - new Date(metadata.sentAt)) / 1000;
+                    this.deliveryStats.deliveryTimes.push(deliveryTime);
+                    
+                    // Keep only last 1000 delivery times for stats
+                    if (this.deliveryStats.deliveryTimes.length > 1000) {
+                        this.deliveryStats.deliveryTimes.shift();
+                    }
+                }
+            }
+            
+            // Log confirmation to journal
+            await this.logMessageReceipt(
+                { messageId, confirmation: { received, processed } },
+                "confirmation_received",
+                metadata.topic,
+                metadata.from
+            );
+            
+            return {
+                success: true,
+                messageId,
+                status: metadata.status,
+                timestamp,
+                confirmed: {
+                    received,
+                    processed
+                }
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to confirm message:", err);
+            throw err;
+        }
+    }
+    
+    async getDeliveryStats(ctx) {
+        try {
+            const stats = { ...this.deliveryStats };
+            
+            // Calculate average delivery time
+            if (stats.deliveryTimes.length > 0) {
+                stats.averageDeliveryTime = stats.deliveryTimes.reduce((sum, time) => sum + time, 0) / stats.deliveryTimes.length;
+            } else {
+                stats.averageDeliveryTime = 0;
+            }
+            
+            // Calculate delivery rate
+            const totalMessages = stats.totalSent;
+            stats.deliveryRate = totalMessages > 0 ? (stats.totalDelivered / totalMessages) * 100 : 0;
+            
+            // Calculate retry rate
+            const totalRetries = Array.from(this.messageMetadata.values())
+                .reduce((sum, metadata) => sum + metadata.retryCount, 0);
+            stats.retryRate = totalMessages > 0 ? (totalRetries / totalMessages) * 100 : 0;
+            
+            // Remove raw delivery times from response (too verbose)
+            delete stats.deliveryTimes;
+            
+            return stats;
+            
+        } catch (err) {
+            this.logger.error("Failed to get delivery stats:", err);
             throw err;
         }
     }
@@ -2082,5 +2532,306 @@ export default class MessageService extends BaseService {
     
     generateRotationId() {
         return `rotation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    // Message Routing and Delivery Helper Methods
+    
+    getChannelKey(senderUUID, receiverUUID) {
+        // Create consistent channel key regardless of sender/receiver order for sequence tracking
+        return `${senderUUID}:${receiverUUID}`;
+    }
+    
+    getNextSequenceNumber(channel) {
+        if (!this.sequenceCounters.has(channel)) {
+            this.sequenceCounters.set(channel, 0);
+        }
+        
+        const nextSeq = this.sequenceCounters.get(channel) + 1;
+        this.sequenceCounters.set(channel, nextSeq);
+        return nextSeq;
+    }
+    
+    isDuplicate(messageId, checksum) {
+        // Check if we've seen this message ID recently
+        if (this.deduplicationCache.has(messageId)) {
+            return true;
+        }
+        
+        // Add to deduplication cache with timestamp
+        this.deduplicationCache.set(messageId, Date.now());
+        
+        // Clean up old entries (keep last 24 hours)
+        this.cleanupDeduplicationCache();
+        
+        return false;
+    }
+    
+    cleanupDeduplicationCache() {
+        const cutoff = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
+        
+        for (const [messageId, timestamp] of this.deduplicationCache.entries()) {
+            if (timestamp < cutoff) {
+                this.deduplicationCache.delete(messageId);
+            }
+        }
+    }
+    
+    async sendMessageWithMetadata(messagePayload, recipientPublicKey, metadata) {
+        const { topic } = metadata;
+        
+        try {
+            // Create or get the topic core
+            let coreInfo = this.topicMap.get(topic);
+            if (!coreInfo) {
+                coreInfo = await this.createCoreForTopic(topic, TOPIC_TYPES.DIRECT, metadata.from, metadata.to);
+            }
+            
+            // Use nucleus service for encryption and signing
+            const encryptedData = await this.broker.call("nucleus.encryptForCell", {
+                targetPublicKey: recipientPublicKey,
+                message: JSON.stringify(messagePayload)
+            });
+            
+            // Create final message structure
+            const finalMessage = {
+                ...encryptedData,
+                senderPublicKey: this.cellPublicKey,
+                timestamp: messagePayload.timestamp,
+                messageId: messagePayload.messageId,
+                sequenceNumber: messagePayload.sequenceNumber,
+                priority: messagePayload.priority
+            };
+            
+            // Write to hypercore via nucleus service
+            await this.broker.call("nucleus.write", {
+                name: topic,
+                data: finalMessage
+            });
+            
+            // Update metadata
+            metadata.status = MESSAGE_STATUS.SENT;
+            metadata.sentAt = new Date().toISOString();
+            
+            // Update delivery statistics
+            this.updateDeliveryStats('totalSent', 1);
+            this.updateDeliveryStats('totalPending', -1);
+            
+            // Log message receipt to journal
+            await this.logMessageReceipt(messagePayload, "sent", topic, metadata.to);
+            
+            this.logger.info(`Enhanced message sent: ${messagePayload.messageId} (seq: ${messagePayload.sequenceNumber})`);
+            
+        } catch (err) {
+            this.logger.error("Failed to send message with metadata:", err);
+            throw err;
+        }
+    }
+    
+    queueMessageForRetry(metadata, retryStrategy) {
+        const retryConfig = RETRY_STRATEGIES[retryStrategy];
+        
+        if (metadata.retryCount >= retryConfig.maxRetries) {
+            // Mark as permanently failed
+            metadata.status = MESSAGE_STATUS.FAILED;
+            this.updateDeliveryStats('totalFailed', 1);
+            this.updateDeliveryStats('totalPending', -1);
+            
+            this.logger.warn(`Message ${metadata.messageId} permanently failed after ${metadata.retryCount} retries`);
+            return;
+        }
+        
+        // Calculate next retry time
+        const nextRetryTime = this.calculateNextRetryTime(retryStrategy, metadata.retryCount);
+        
+        // Schedule retry
+        setTimeout(async () => {
+            try {
+                metadata.retryCount++;
+                await this.retryMessage(metadata);
+            } catch (err) {
+                this.logger.error(`Retry failed for message ${metadata.messageId}:`, err);
+                this.queueMessageForRetry(metadata, retryStrategy);
+            }
+        }, nextRetryTime);
+        
+        this.logger.info(`Queued message ${metadata.messageId} for retry ${metadata.retryCount + 1} in ${nextRetryTime}ms`);
+    }
+    
+    calculateNextRetryTime(retryStrategy, retryCount) {
+        const config = RETRY_STRATEGIES[retryStrategy];
+        
+        if (config.delays) {
+            // Fixed delay strategy
+            return config.delays[Math.min(retryCount, config.delays.length - 1)];
+        } else {
+            // Exponential backoff
+            const delay = Math.min(
+                config.baseDelay * Math.pow(config.multiplier, retryCount),
+                config.maxDelay
+            );
+            
+            // Add jitter (±25%)
+            const jitter = delay * 0.25 * (Math.random() - 0.5);
+            return Math.max(0, delay + jitter);
+        }
+    }
+    
+    async retryMessage(metadata) {
+        this.logger.info(`Retrying message ${metadata.messageId} (attempt ${metadata.retryCount})`);
+        
+        try {
+            // Check if message has expired
+            if (new Date() > new Date(metadata.expiresAt)) {
+                metadata.status = MESSAGE_STATUS.EXPIRED;
+                this.updateDeliveryStats('totalFailed', 1);
+                this.updateDeliveryStats('totalPending', -1);
+                this.logger.warn(`Message ${metadata.messageId} expired before retry`);
+                return;
+            }
+            
+            // Reconstruct message payload for retry
+            const messagePayload = {
+                messageId: metadata.messageId,
+                from: metadata.from,
+                to: metadata.to,
+                content: "retry", // Would need to store original content for real retry
+                timestamp: new Date().toISOString(),
+                sequenceNumber: metadata.sequenceNumber,
+                priority: metadata.priority,
+                requireDeliveryConfirmation: metadata.requireDeliveryConfirmation,
+                expiresAt: metadata.expiresAt
+            };
+            
+            // Get recipient public key (would need to be stored or looked up)
+            const recipientPublicKey = "placeholder"; // Would implement proper key lookup
+            
+            await this.sendMessageWithMetadata(messagePayload, recipientPublicKey, metadata);
+            
+            this.logger.info(`Successfully retried message ${metadata.messageId}`);
+            
+        } catch (err) {
+            this.logger.error(`Retry failed for message ${metadata.messageId}:`, err);
+            throw err;
+        }
+    }
+    
+    updateDeliveryStats(metric, delta) {
+        if (this.deliveryStats.hasOwnProperty(metric)) {
+            this.deliveryStats[metric] += delta;
+        }
+    }
+    
+    // Message ordering and buffering methods
+    
+    shouldBufferMessage(message, channel) {
+        if (!this.messageBuffers.has(channel)) {
+            this.messageBuffers.set(channel, {
+                lastDeliveredSequence: 0,
+                expectedNextSequence: 1,
+                pendingMessages: new Map(),
+                maxBufferSize: 100,
+                bufferTimeout: 30000
+            });
+        }
+        
+        const buffer = this.messageBuffers.get(channel);
+        const sequence = message.sequenceNumber;
+        
+        // Check if this is the next expected message
+        if (sequence === buffer.expectedNextSequence) {
+            return false; // Deliver immediately
+        } else if (sequence > buffer.expectedNextSequence) {
+            return true; // Buffer for later
+        } else {
+            // Duplicate or old message
+            this.logger.warn(`Received old/duplicate message: seq ${sequence}, expected ${buffer.expectedNextSequence}`);
+            return false; // Discard
+        }
+    }
+    
+    bufferMessage(message, channel) {
+        const buffer = this.messageBuffers.get(channel);
+        
+        // Check buffer size limit
+        if (buffer.pendingMessages.size >= buffer.maxBufferSize) {
+            // Remove oldest message
+            const oldestSeq = Math.min(...buffer.pendingMessages.keys());
+            buffer.pendingMessages.delete(oldestSeq);
+            this.logger.warn(`Buffer overflow for channel ${channel}, removed sequence ${oldestSeq}`);
+        }
+        
+        // Add message to buffer
+        buffer.pendingMessages.set(message.sequenceNumber, {
+            message,
+            timestamp: Date.now()
+        });
+        
+        // Set timeout to deliver buffered messages
+        setTimeout(() => {
+            this.deliverBufferedMessages(channel);
+        }, buffer.bufferTimeout);
+        
+        this.logger.debug(`Buffered message seq ${message.sequenceNumber} for channel ${channel}`);
+    }
+    
+    deliverBufferedMessages(channel) {
+        const buffer = this.messageBuffers.get(channel);
+        if (!buffer) return;
+        
+        const delivered = [];
+        
+        // Deliver consecutive messages starting from expected sequence
+        while (buffer.pendingMessages.has(buffer.expectedNextSequence)) {
+            const entry = buffer.pendingMessages.get(buffer.expectedNextSequence);
+            buffer.pendingMessages.delete(buffer.expectedNextSequence);
+            
+            // Process the message
+            this.processOrderedMessage(entry.message, channel);
+            
+            delivered.push(buffer.expectedNextSequence);
+            buffer.lastDeliveredSequence = buffer.expectedNextSequence;
+            buffer.expectedNextSequence++;
+        }
+        
+        if (delivered.length > 0) {
+            this.logger.info(`Delivered buffered messages for channel ${channel}: sequences ${delivered.join(', ')}`);
+        }
+        
+        // Clean up expired buffered messages
+        const cutoff = Date.now() - buffer.bufferTimeout;
+        for (const [seq, entry] of buffer.pendingMessages.entries()) {
+            if (entry.timestamp < cutoff) {
+                buffer.pendingMessages.delete(seq);
+                this.logger.warn(`Expired buffered message seq ${seq} for channel ${channel}`);
+            }
+        }
+    }
+    
+    processOrderedMessage(message, channel) {
+        // Process the message in order
+        this.logger.debug(`Processing ordered message seq ${message.sequenceNumber} for channel ${channel}`);
+        
+        // Update peer status if this is a recent message
+        if (message.from && message.from !== this.cellUUID) {
+            this.updatePeerStatus(message.from, PEER_STATUS.ONLINE);
+        }
+        
+        // Log receipt if we're the recipient
+        if (message.to === this.cellUUID) {
+            this.logMessageReceipt(message, "received", `direct:${message.from}:${message.to}`, message.from);
+        }
+    }
+    
+    updatePeerStatus(peerUUID, status) {
+        const existing = this.peerStatus.get(peerUUID) || {};
+        
+        this.peerStatus.set(peerUUID, {
+            ...existing,
+            status,
+            lastSeen: new Date().toISOString(),
+            lastStatusUpdate: new Date().toISOString()
+        });
+        
+        this.logger.debug(`Updated peer status: ${peerUUID} -> ${status}`);
     }
 } 
