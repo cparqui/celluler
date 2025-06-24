@@ -1098,7 +1098,7 @@ wIDAQAB
                 expect(handshake.uuid).toBe(actualCellUUID);
                 expect(handshake.publicKey).toBeDefined();
                 expect(handshake.inboxDiscoveryKey).toBeDefined();
-                expect(handshake.journalDiscoveryKey).toBe("not-implemented");
+                expect(handshake.journalDiscoveryKey).toBeDefined();
                 expect(handshake.capabilities).toContain("messaging");
                 expect(handshake.timestamp).toBeDefined();
                 expect(handshake.signature).toBeDefined();
@@ -1294,6 +1294,148 @@ wIDAQAB
                 
                 // Verify removed from trusted set
                 expect(messageService.trustedPeers.has(testUUID)).toBe(false);
+            });
+        });
+    });
+
+    describe("Journal Integration", () => {
+        beforeEach(async () => {
+            // Ensure service is properly initialized
+            const service = broker.getLocalService("message");
+            expect(service.cellUUID).toBeDefined();
+            expect(service.cellPublicKey).toBeDefined();
+        });
+
+        describe("Message Receipt Logging", () => {
+            it("should log sent message receipt", async () => {
+                const service = broker.getLocalService("message");
+                const messageData = { content: "test message", from: "alice", to: "bob" };
+                const direction = "sent";
+                const topic = "direct:alice:bob";
+                const participantUUID = "bob-uuid";
+
+                const receiptId = await service.logMessageReceipt(messageData, direction, topic, participantUUID);
+
+                expect(receiptId).toMatch(/^receipt_\d+_[a-z0-9]+$/);
+            });
+
+            it("should log received message receipt", async () => {
+                const service = broker.getLocalService("message");
+                const messageData = { content: "test message", from: "alice", to: "bob" };
+                const direction = "received";
+                const topic = "direct:alice:bob";
+                const participantUUID = "alice-uuid";
+
+                const receiptId = await service.logMessageReceipt(messageData, direction, topic, participantUUID);
+
+                expect(receiptId).toMatch(/^receipt_\d+_[a-z0-9]+$/);
+            });
+
+            it("should handle errors gracefully during receipt logging", async () => {
+                const service = broker.getLocalService("message");
+                // Test with invalid cellUUID to trigger graceful error handling
+                const originalCellUUID = service.cellUUID;
+                service.cellUUID = null;
+
+                const messageData = { content: "test message" };
+                const receiptId = await service.logMessageReceipt(messageData, "sent", "topic", "peer");
+
+                expect(receiptId).toBeUndefined();
+                
+                // Restore cellUUID
+                service.cellUUID = originalCellUUID;
+            });
+        });
+
+        describe("Handshake Record Logging", () => {
+            it("should log outgoing handshake record", async () => {
+                const service = broker.getLocalService("message");
+                const peerUUID = "peer-uuid";
+                const handshakeType = "outgoing";
+                const success = true;
+                const capabilities = ["messaging", "storage"];
+
+                const handshakeId = await service.logHandshakeRecord(peerUUID, handshakeType, success, capabilities);
+
+                expect(handshakeId).toMatch(/^handshake_\d+_[a-z0-9]+$/);
+            });
+
+            it("should log failed handshake record", async () => {
+                const service = broker.getLocalService("message");
+                const peerUUID = "peer-uuid";
+                const handshakeType = "incoming";
+                const success = false;
+                const capabilities = [];
+
+                const handshakeId = await service.logHandshakeRecord(peerUUID, handshakeType, success, capabilities);
+
+                expect(handshakeId).toMatch(/^handshake_\d+_[a-z0-9]+$/);
+            });
+        });
+
+        describe("Key Rotation Logging", () => {
+            it("should log key rotation event", async () => {
+                const service = broker.getLocalService("message");
+                const oldPublicKey = "old-public-key";
+                const newPublicKey = "new-public-key";
+                const reason = "scheduled";
+
+                const rotationId = await service.logKeyRotation(oldPublicKey, newPublicKey, reason);
+
+                expect(rotationId).toMatch(/^rotation_\d+_[a-z0-9]+$/);
+            });
+
+            it("should log compromise-driven key rotation", async () => {
+                const service = broker.getLocalService("message");
+                const oldPublicKey = "compromised-key";
+                const newPublicKey = "new-secure-key";
+                const reason = "compromise";
+
+                const rotationId = await service.logKeyRotation(oldPublicKey, newPublicKey, reason);
+
+                expect(rotationId).toMatch(/^rotation_\d+_[a-z0-9]+$/);
+            });
+        });
+
+        describe("Hash Generation", () => {
+            it("should generate consistent message hashes", () => {
+                const service = broker.getLocalService("message");
+                const message1 = "test message";
+                const message2 = "test message";
+                const message3 = "different message";
+
+                const hash1 = service.hashMessage(message1);
+                const hash2 = service.hashMessage(message2);
+                const hash3 = service.hashMessage(message3);
+
+                expect(hash1).toBe(hash2);
+                expect(hash1).not.toBe(hash3);
+                expect(hash1).toMatch(/^[a-f0-9]{64}$/); // SHA256 hex format
+            });
+
+            it("should generate consistent participant hashes regardless of order", () => {
+                const service = broker.getLocalService("message");
+                const uuid1 = "alice-uuid";
+                const uuid2 = "bob-uuid";
+
+                const hash1 = service.hashParticipants(uuid1, uuid2);
+                const hash2 = service.hashParticipants(uuid2, uuid1);
+
+                expect(hash1).toBe(hash2);
+                expect(hash1).toMatch(/^[a-f0-9]{64}$/);
+            });
+
+            it("should generate different hashes for different topics", () => {
+                const service = broker.getLocalService("message");
+                const topic1 = "direct:alice:bob";
+                const topic2 = "direct:alice:charlie";
+
+                const hash1 = service.hashTopic(topic1);
+                const hash2 = service.hashTopic(topic2);
+
+                expect(hash1).not.toBe(hash2);
+                expect(hash1).toMatch(/^[a-f0-9]{64}$/);
+                expect(hash2).toMatch(/^[a-f0-9]{64}$/);
             });
         });
     });

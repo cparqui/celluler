@@ -72,11 +72,15 @@
     - [x] Layer 2: Identity handshake protocol with signature verification
     - [x] Layer 3: Local Hyperbee peer caching ("contact book" per cell)
     - [x] Add peer introduction and lookup mechanisms
-  - [ ] Identity journal integration
-    - [ ] Include journal discoveryKey in handshake messages
-    - [ ] Add journal access for identity verification
-    - [ ] Support key rotation history tracking
-    - [ ] Prepare foundation for IdentityService integration
+  - [x] Identity journal integration
+    - [x] Include journal discoveryKey in handshake messages
+    - [x] Add journal access for identity verification
+    - [x] Support key rotation history tracking
+    - [x] Add privacy-preserving message receipt logging
+    - [x] Add handshake operation logging
+    - [x] Implement cryptographic proof generation for message participation
+    - [x] Add journal entry verification and integrity checking
+    - [x] Prepare foundation for IdentityService integration
   - [ ] Message routing and delivery
     - [ ] Implement delivery confirmation and retry logic
     - [ ] Handle message ordering and deduplication

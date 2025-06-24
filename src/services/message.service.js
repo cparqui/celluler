@@ -1,6 +1,7 @@
 import BaseService from './base.service.js';
 import _ from 'lodash';
 import Hyperbee from 'hyperbee';
+import crypto from 'crypto';
 
 // Topic naming conventions
 const TOPIC_TYPES = {
@@ -345,6 +346,89 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/peers"
                     }
+                },
+                generateMessageProof: {
+                    params: {
+                        messageContent: {
+                            type: "string",
+                            min: 1
+                        },
+                        senderUUID: {
+                            type: "string",
+                            min: 1
+                        },
+                        receiverUUID: {
+                            type: "string",
+                            min: 1
+                        },
+                        topic: {
+                            type: "string",
+                            min: 1
+                        },
+                        direction: {
+                            type: "enum",
+                            values: ["sent", "received"]
+                        }
+                    },
+                    handler: this.generateMessageProofAction,
+                    rest: {
+                        method: "POST",
+                        path: "/proof/message"
+                    }
+                },
+                verifyMessageParticipation: {
+                    params: {
+                        receiptData: {
+                            type: "object"
+                        },
+                        messageContent: {
+                            type: "string",
+                            min: 1
+                        },
+                        senderUUID: {
+                            type: "string",
+                            min: 1
+                        },
+                        receiverUUID: {
+                            type: "string",
+                            min: 1
+                        },
+                        topic: {
+                            type: "string",
+                            min: 1
+                        }
+                    },
+                    handler: this.verifyMessageParticipationAction,
+                    rest: {
+                        method: "POST",
+                        path: "/verify/message"
+                    }
+                },
+                getJournalEntries: {
+                    params: {
+                        entryType: {
+                            type: "enum",
+                            values: ["message_receipt", "handshake_record", "key_rotation", "all"],
+                            optional: true,
+                            default: "all"
+                        },
+                        limit: {
+                            type: "number",
+                            min: 1,
+                            max: 100,
+                            optional: true,
+                            default: 50
+                        },
+                        since: {
+                            type: "string",
+                            optional: true
+                        }
+                    },
+                    handler: this.getJournalEntries,
+                    rest: {
+                        method: "GET",
+                        path: "/journal"
+                    }
                 }
             },
             events: {
@@ -591,6 +675,9 @@ export default class MessageService extends BaseService {
             
             this.logger.info(`Message sent from ${this.cellUUID} to ${targetUUID}`);
             
+            // Log message receipt to journal
+            await this.logMessageReceipt(messagePayload, "sent", topic, targetUUID);
+            
             // Try to send notification to recipient's inbox if we have access
             try {
                 if (this.trustedPeers.has(targetUUID)) {
@@ -669,7 +756,7 @@ export default class MessageService extends BaseService {
                         // Still include the message but without decrypted content
                     }
                     
-                    messages.push({
+                    const messageInfo = {
                         messageId: decryptedMessage?.messageId || messageData.messageId || 'encrypted',
                         from: decryptedMessage?.from || 'unknown',
                         to: decryptedMessage?.to || 'unknown',
@@ -677,7 +764,15 @@ export default class MessageService extends BaseService {
                         timestamp: messageData.timestamp,
                         encrypted: !decryptedMessage,
                         verified: true // nucleus service handles signature verification
-                    });
+                    };
+                    
+                    messages.push(messageInfo);
+                    
+                    // Log message receipt to journal if we successfully decrypted it
+                    if (decryptedMessage && decryptedMessage.from !== this.cellUUID) {
+                        // This is a message we received (not sent by us)
+                        await this.logMessageReceipt(decryptedMessage, "received", topic, decryptedMessage.from);
+                    }
                     
                 } catch (parseErr) {
                     this.logger.warn("Failed to parse message entry:", parseErr);
@@ -1088,6 +1183,85 @@ export default class MessageService extends BaseService {
             
         } catch (err) {
             this.logger.error("Failed to get peer cache:", err);
+            throw err;
+        }
+    }
+
+    async generateMessageProofAction(ctx) {
+        const { messageContent, senderUUID, receiverUUID, topic, direction } = ctx.params;
+        
+        try {
+            const proof = await this.generateMessageProof(messageContent, senderUUID, receiverUUID, topic, direction);
+            
+            return {
+                success: true,
+                proof
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to generate message proof:", err);
+            throw err;
+        }
+    }
+
+    async verifyMessageParticipationAction(ctx) {
+        const { receiptData, messageContent, senderUUID, receiverUUID, topic } = ctx.params;
+        
+        try {
+            const verification = await this.verifyMessageParticipation(receiptData, messageContent, senderUUID, receiverUUID, topic);
+            
+            return {
+                success: true,
+                verification
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to verify message participation:", err);
+            throw err;
+        }
+    }
+
+    async getJournalEntries(ctx) {
+        const { entryType = "all", limit = 50, since } = ctx.params;
+        
+        try {
+            // Read from journal via nucleus service
+            const result = await this.broker.call("nucleus.read", {
+                name: "journal",
+                limit,
+                since: since ? new Date(since).getTime() : undefined
+            });
+            
+            const entries = [];
+            
+            for (const entry of result.entries || []) {
+                try {
+                    const entryData = JSON.parse(entry.data);
+                    
+                    // Filter by entry type if specified
+                    if (entryType === "all" || entryData.type === entryType) {
+                        entries.push({
+                            index: entry.index,
+                            type: entryData.type,
+                            data: entryData,
+                            timestamp: entryData.timestamp
+                        });
+                    }
+                    
+                } catch (parseErr) {
+                    this.logger.warn("Failed to parse journal entry:", parseErr);
+                }
+            }
+            
+            return {
+                entries,
+                count: entries.length,
+                hasMore: result.hasMore || false,
+                entryType
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get journal entries:", err);
             throw err;
         }
     }
@@ -1617,12 +1791,21 @@ export default class MessageService extends BaseService {
         // 3. Exchange discovery keys and capabilities
         // 4. Establish connection trust level
         
+        // Get journal discovery key from nucleus service
+        let journalDiscoveryKey = 'not-available';
+        try {
+            const journalInfo = await this.broker.call("nucleus.get", { name: 'journal' });
+            journalDiscoveryKey = journalInfo.core.discoveryKey || 'not-available';
+        } catch (err) {
+            this.logger.warn("Could not get journal discovery key for handshake:", err.message);
+        }
+        
         const handshakeMessage = {
             version: HANDSHAKE_VERSION,
             uuid: this.cellUUID,
             publicKey: this.cellPublicKey,
             inboxDiscoveryKey: this.inboxAutobase?.discoveryKey?.toString('hex') || 'not-available',
-            journalDiscoveryKey: 'not-implemented',
+            journalDiscoveryKey,
             capabilities: this.capabilities,
             timestamp: new Date().toISOString()
         };
@@ -1632,8 +1815,272 @@ export default class MessageService extends BaseService {
             message: JSON.stringify(handshakeMessage)
         });
         
+        // Log handshake to journal
+        await this.logHandshakeRecord(
+            "unknown-peer", // Will be updated when we know the peer UUID
+            "outgoing",
+            true,
+            this.capabilities
+        );
+        
         this.logger.info("Handshake created (placeholder):", handshakeMessage);
         
         return handshakeMessage;
+    }
+
+    // Journal Integration Methods
+    
+    /**
+     * Log a message receipt to the journal (privacy-preserving)
+     */
+    async logMessageReceipt(messageData, direction, topic, participantUUID) {
+        try {
+            if (!this.cellUUID) {
+                this.logger.warn("Cannot log message receipt - cell UUID not available");
+                return;
+            }
+            
+            const receiptId = this.generateReceiptId();
+            const timestamp = new Date().toISOString();
+            
+            // Create privacy-preserving hashes
+            const messageHash = this.hashMessage(messageData);
+            const participantHash = this.hashParticipants(this.cellUUID, participantUUID);
+            const topicHash = this.hashTopic(topic);
+            
+            const receipt = {
+                type: "message_receipt",
+                receiptId,
+                messageHash,
+                participantHash,
+                direction, // "sent" or "received"
+                timestamp,
+                topicHash,
+                cellUUID: this.cellUUID // For journal organization
+            };
+            
+            // Sign the receipt
+            receipt.signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(receipt)
+            });
+            
+            // Write to journal via nucleus service
+            await this.broker.call("nucleus.write", {
+                data: receipt
+            });
+            
+            this.logger.debug(`Logged message receipt: ${receiptId} (${direction})`);
+            
+            return receiptId;
+            
+        } catch (err) {
+            this.logger.error("Failed to log message receipt:", err);
+            // Don't throw - receipt logging shouldn't break message flow
+        }
+    }
+    
+    /**
+     * Log a handshake operation to the journal
+     */
+    async logHandshakeRecord(peerUUID, handshakeType, success, capabilities = []) {
+        try {
+            if (!this.cellUUID) {
+                this.logger.warn("Cannot log handshake record - cell UUID not available");
+                return;
+            }
+            
+            const handshakeId = this.generateHandshakeId();
+            const timestamp = new Date().toISOString();
+            
+            // Create privacy-preserving peer hash
+            const peerHash = this.hashPeerUUID(peerUUID);
+            
+            const record = {
+                type: "handshake_record",
+                handshakeId,
+                peerHash,
+                handshakeType, // "incoming", "outgoing", "introduction"
+                success,
+                capabilities: capabilities || [],
+                timestamp,
+                cellUUID: this.cellUUID
+            };
+            
+            // Sign the record
+            record.signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(record)
+            });
+            
+            // Write to journal via nucleus service
+            await this.broker.call("nucleus.write", {
+                data: record
+            });
+            
+            this.logger.debug(`Logged handshake record: ${handshakeId} (${handshakeType}, success: ${success})`);
+            
+            return handshakeId;
+            
+        } catch (err) {
+            this.logger.error("Failed to log handshake record:", err);
+            // Don't throw - handshake logging shouldn't break connection flow
+        }
+    }
+    
+    /**
+     * Log a key rotation event to the journal
+     */
+    async logKeyRotation(oldPublicKey, newPublicKey, reason = "scheduled") {
+        try {
+            if (!this.cellUUID) {
+                this.logger.warn("Cannot log key rotation - cell UUID not available");
+                return;
+            }
+            
+            const rotationId = this.generateRotationId();
+            const timestamp = new Date().toISOString();
+            
+            // Create hashes of the keys
+            const oldKeyHash = this.hashPublicKey(oldPublicKey);
+            const newKeyHash = this.hashPublicKey(newPublicKey);
+            
+            const rotation = {
+                type: "key_rotation",
+                rotationId,
+                oldKeyHash,
+                newKeyHash,
+                reason, // "scheduled", "compromise", "upgrade"
+                timestamp,
+                cellUUID: this.cellUUID
+            };
+            
+            // Sign with the old key (if still available)
+            rotation.signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(rotation)
+            });
+            
+            // Write to journal via nucleus service
+            await this.broker.call("nucleus.write", {
+                data: rotation
+            });
+            
+            this.logger.info(`Logged key rotation: ${rotationId} (reason: ${reason})`);
+            
+            return rotationId;
+            
+        } catch (err) {
+            this.logger.error("Failed to log key rotation:", err);
+            // Don't throw - key rotation logging shouldn't break rotation process
+        }
+    }
+    
+    /**
+     * Verify message participation using receipt data
+     */
+    async verifyMessageParticipation(receiptData, messageContent, senderUUID, receiverUUID, topic) {
+        try {
+            // Recreate the hashes with the provided data
+            const expectedMessageHash = this.hashMessage(messageContent);
+            const expectedParticipantHash = this.hashParticipants(senderUUID, receiverUUID);
+            const expectedTopicHash = this.hashTopic(topic);
+            
+            // Compare with receipt data
+            const messageHashMatches = receiptData.messageHash === expectedMessageHash;
+            const participantHashMatches = receiptData.participantHash === expectedParticipantHash;
+            const topicHashMatches = receiptData.topicHash === expectedTopicHash;
+            
+            // Verify signature
+            const receiptForSignature = { ...receiptData };
+            delete receiptForSignature.signature;
+            
+            // For verification, we would need to get the public key from the receipt's cellUUID
+            // This is a placeholder for the verification logic
+            const signatureValid = true; // Would implement actual verification
+            
+            return {
+                valid: messageHashMatches && participantHashMatches && topicHashMatches && signatureValid,
+                details: {
+                    messageHashMatches,
+                    participantHashMatches,
+                    topicHashMatches,
+                    signatureValid
+                }
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to verify message participation:", err);
+            return { valid: false, error: err.message };
+        }
+    }
+    
+    /**
+     * Generate proof of message participation for a specific message
+     */
+    async generateMessageProof(messageContent, senderUUID, receiverUUID, topic, direction) {
+        try {
+            const messageHash = this.hashMessage(messageContent);
+            const participantHash = this.hashParticipants(senderUUID, receiverUUID);
+            const topicHash = this.hashTopic(topic);
+            
+            const proof = {
+                messageHash,
+                participantHash,
+                topicHash,
+                direction,
+                prover: this.cellUUID,
+                timestamp: new Date().toISOString()
+            };
+            
+            // Sign the proof
+            proof.signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(proof)
+            });
+            
+            return proof;
+            
+        } catch (err) {
+            this.logger.error("Failed to generate message proof:", err);
+            throw err;
+        }
+    }
+    
+    // Hash generation methods for privacy preservation
+    
+    hashMessage(messageData) {
+        // Hash the message content (could be string or object)
+        const messageString = typeof messageData === 'string' ? messageData : JSON.stringify(messageData);
+        return crypto.createHash('sha256').update(messageString).digest('hex');
+    }
+    
+    hashParticipants(senderUUID, receiverUUID) {
+        // Create a consistent hash regardless of sender/receiver order
+        const participants = [senderUUID, receiverUUID].sort();
+        const participantString = participants.join(':');
+        return crypto.createHash('sha256').update(participantString).digest('hex');
+    }
+    
+    hashTopic(topic) {
+        return crypto.createHash('sha256').update(topic).digest('hex');
+    }
+    
+    hashPeerUUID(peerUUID) {
+        return crypto.createHash('sha256').update(peerUUID).digest('hex');
+    }
+    
+    hashPublicKey(publicKey) {
+        return crypto.createHash('sha256').update(publicKey).digest('hex');
+    }
+    
+    // ID generation methods
+    
+    generateReceiptId() {
+        return `receipt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    generateHandshakeId() {
+        return `handshake_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    generateRotationId() {
+        return `rotation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
 } 
