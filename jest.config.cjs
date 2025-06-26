@@ -8,7 +8,7 @@ module.exports = {
     detectOpenHandles: true,
     collectCoverage: true,
     coverageDirectory: 'coverage',
-    coverageReporters: ['text', 'lcov', 'html'],
+    coverageReporters: ['text', 'lcov', 'html', 'json'],
     coverageThreshold: {
         global: {
             branches: 80,
@@ -17,10 +17,28 @@ module.exports = {
             statements: 80
         }
     },
+    coveragePathIgnorePatterns: [
+        '/node_modules/',
+        '/test/',
+        '/coverage/',
+        '/tmp/',
+        '/dist/'
+    ],
+    testMatch: [
+        '<rootDir>/test/**/*.test.js',
+        '<rootDir>/test/**/*.spec.js'
+    ],
+    testPathIgnorePatterns: [
+        '/node_modules/',
+        '/tmp/'
+    ],
     transform: {
         '^.+\\.js$': 'babel-jest'
     },
     transformIgnorePatterns: [
         'node_modules/(?!(moleculer|b4a|corestore|hypercore|hyperswarm)/)'
-    ]
+    ],
+    setupFilesAfterEnv: ['<rootDir>/test/setup.js'],
+    verbose: true,
+    maxWorkers: 1 // Run tests sequentially to avoid conflicts
 }; 

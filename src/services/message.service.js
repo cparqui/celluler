@@ -7,7 +7,7 @@ import crypto from 'crypto';
 const TOPIC_TYPES = {
   DIRECT: "direct",
   INBOX: "inbox", 
-  PEER_CACHE: "peers",
+  PEER_CACHE: "peer_cache",
   JOURNAL: "journal"
 };
 

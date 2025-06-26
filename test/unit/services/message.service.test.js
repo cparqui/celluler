@@ -1676,4 +1676,508 @@ wIDAQAB
             });
         });
     });
+
+    // Security and Spam Prevention Tests
+    describe("Security and Spam Prevention", () => {
+        let testPeerUUID;
+        let testPublicKey;
+
+        beforeEach(() => {
+            testPeerUUID = "test-peer-security-" + Date.now();
+            testPublicKey = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2vx7agoebGcQSuuPiLJX\nZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tS\noc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt\n7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0\nzgdLR_o1hiabtAjOcvjsyb3JnYXLovpDgjH16CjCDY1dQkrhwIGg8LCWfLUYmRKV\nMjjNmUBG8xh3CtbKWPyCwfJgNI_R7O6pXLJgPnMc8uxJRaBFOGjw8q_SZfCKS1fH\n-----END PUBLIC KEY-----";
+        });
+
+        describe("Rate Limiting", () => {
+            it("should allow messages within rate limits", () => {
+                const service = broker.getLocalService("message");
+                
+                // First few messages should be allowed
+                for (let i = 0; i < 3; i++) {
+                    const result = service.checkRateLimit(testPeerUUID, 'message');
+                    expect(result.allowed).toBe(true);
+                    expect(result.remainingTime).toBe(0);
+                }
+            });
+
+            it("should block messages when rate limit exceeded", () => {
+                const service = broker.getLocalService("message");
+                
+                // Exceed the rate limit
+                for (let i = 0; i < 10; i++) {
+                    service.checkRateLimit(testPeerUUID, 'message');
+                }
+                
+                const result = service.checkRateLimit(testPeerUUID, 'message');
+                expect(result.allowed).toBe(false);
+                expect(result.remainingTime).toBeGreaterThan(0);
+            });
+
+            it("should reset rate limits after window expires", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Exceed rate limit
+                for (let i = 0; i < 10; i++) {
+                    service.checkRateLimit(testPeerUUID, 'message');
+                }
+                
+                // Mock time passing by manipulating the rate limiter
+                const rateLimiter = service.rateLimiters.get(testPeerUUID);
+                rateLimiter.lastReset = Date.now() - (2 * 60 * 1000); // 2 minutes ago
+                
+                const result = service.checkRateLimit(testPeerUUID, 'message');
+                expect(result.allowed).toBe(true);
+            });
+
+            it("should handle different rate limit types", () => {
+                const service = broker.getLocalService("message");
+                
+                // Test notification rate limiting
+                for (let i = 0; i < 15; i++) {
+                    const result = service.checkRateLimit(testPeerUUID, 'notification');
+                    expect(result.allowed).toBe(true);
+                }
+                
+                // Test handshake rate limiting
+                for (let i = 0; i < 8; i++) {
+                    const result = service.checkRateLimit(testPeerUUID, 'handshake');
+                    expect(result.allowed).toBe(true);
+                }
+            });
+        });
+
+        describe("Spam Detection", () => {
+            it("should detect spam with suspicious keywords", () => {
+                const service = broker.getLocalService("message");
+                const spamMessage = "This is a spam message with scam content and phishing links";
+                
+                const result = service.detectSpam(spamMessage, testPeerUUID);
+                
+                expect(result.isSpam).toBe(true);
+                expect(result.confidence).toBeGreaterThan(60);
+                expect(result.reasons).toContain("Suspicious keywords: spam, scam, phishing");
+            });
+
+            it("should detect oversized messages", () => {
+                const service = broker.getLocalService("message");
+                const oversizedMessage = "A".repeat(15 * 1024); // 15KB
+                
+                const result = service.detectSpam(oversizedMessage, testPeerUUID);
+                
+                expect(result.isSpam).toBe(true);
+                expect(result.reasons).toContain("Message too large");
+            });
+
+            it("should detect excessive word repetition", () => {
+                const service = broker.getLocalService("message");
+                const repetitiveMessage = "spam spam spam spam spam spam spam spam spam spam";
+                
+                const result = service.detectSpam(repetitiveMessage, testPeerUUID);
+                
+                expect(result.isSpam).toBe(true);
+                expect(result.reasons).toContain("Excessive word repetition");
+            });
+
+            it("should detect duplicate content", () => {
+                const service = broker.getLocalService("message");
+                const message = "This is a test message";
+                
+                // First occurrence should not be spam
+                const result1 = service.detectSpam(message, testPeerUUID);
+                expect(result1.isSpam).toBe(false);
+                
+                // Second occurrence should be detected as duplicate
+                const result2 = service.detectSpam(message, testPeerUUID);
+                expect(result2.isSpam).toBe(true);
+                expect(result2.reasons).toContain("Duplicate message content");
+            });
+
+            it("should consider sender reputation", () => {
+                const service = broker.getLocalService("message");
+                const message = "Normal message content";
+                
+                // Set poor reputation for sender
+                service.updateSpamScore(testPeerUUID, 50, "Previous violations");
+                
+                const result = service.detectSpam(message, testPeerUUID);
+                expect(result.isSpam).toBe(true);
+                expect(result.reasons).toContain("Sender has poor reputation");
+            });
+
+            it("should allow legitimate messages", () => {
+                const service = broker.getLocalService("message");
+                const legitimateMessage = "Hello, this is a normal message from a trusted sender.";
+                
+                const result = service.detectSpam(legitimateMessage, testPeerUUID);
+                
+                expect(result.isSpam).toBe(false);
+                expect(result.confidence).toBeLessThan(60);
+                expect(result.reasons).toHaveLength(0);
+            });
+        });
+
+        describe("Spam Score Management", () => {
+            it("should update spam scores correctly", () => {
+                const service = broker.getLocalService("message");
+                
+                service.updateSpamScore(testPeerUUID, 30, "Test violation");
+                
+                const spamData = service.spamScores.get(testPeerUUID);
+                expect(spamData.score).toBe(30);
+                expect(spamData.violations).toHaveLength(1);
+                expect(spamData.violations[0].reason).toBe("Test violation");
+            });
+
+            it("should decay spam scores over time", () => {
+                const service = broker.getLocalService("message");
+                
+                // Set initial score
+                service.updateSpamScore(testPeerUUID, 50, "Initial violation");
+                
+                // Mock time passing
+                const spamData = service.spamScores.get(testPeerUUID);
+                spamData.lastUpdate = Date.now() - (3 * 60 * 60 * 1000); // 3 hours ago
+                
+                // Trigger decay by calling update again
+                service.updateSpamScore(testPeerUUID, 0, "No new violation");
+                
+                const updatedSpamData = service.spamScores.get(testPeerUUID);
+                expect(updatedSpamData.score).toBeLessThan(50);
+            });
+
+            it("should auto-block peers with high spam scores", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add enough violations to trigger auto-block
+                for (let i = 0; i < 10; i++) {
+                    service.updateSpamScore(testPeerUUID, 20, `Violation ${i}`);
+                }
+                
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(true);
+            });
+        });
+
+        describe("Peer Blocking", () => {
+            it("should block and unblock peers", () => {
+                const service = broker.getLocalService("message");
+                
+                // Block peer
+                service.blockPeer(testPeerUUID, "Test blocking");
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(true);
+                
+                // Unblock peer
+                service.blockedPeers.delete(testPeerUUID);
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(false);
+            });
+
+            it("should prevent blocked peers from sending messages", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Block the peer
+                service.blockPeer(testPeerUUID, "Test blocking");
+                
+                // Try to send message to blocked peer
+                try {
+                    await broker.call("message.sendMessage", {
+                        targetUUID: testPeerUUID,
+                        message: "Test message",
+                        recipientPublicKey: testPublicKey
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Cannot send message to blocked peer");
+                }
+            });
+
+            it("should prevent blocked peers from sending notifications", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Block the peer
+                service.blockPeer(testPeerUUID, "Test blocking");
+                
+                // Try to send notification to blocked peer
+                try {
+                    await broker.call("message.sendNotification", {
+                        targetUUID: testPeerUUID,
+                        notification: { type: "test" }
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Cannot send notification to blocked peer");
+                }
+            });
+        });
+
+        describe("Signature Verification", () => {
+            it("should verify valid signatures", async () => {
+                const service = broker.getLocalService("message");
+                const message = "Test message for signature verification";
+                
+                // Mock nucleus service response
+                jest.spyOn(service.broker, 'call').mockResolvedValue(true);
+                
+                const result = await service.verifyMessageSignature(message, testPublicKey, "valid-signature");
+                
+                expect(result.valid).toBe(true);
+                expect(result.cached).toBe(false);
+            });
+
+            it("should cache signature verification results", async () => {
+                const service = broker.getLocalService("message");
+                const message = "Test message for caching";
+                
+                // Mock nucleus service response
+                jest.spyOn(service.broker, 'call').mockResolvedValue(true);
+                
+                // First verification
+                const result1 = await service.verifyMessageSignature(message, testPublicKey, "test-signature");
+                expect(result1.cached).toBe(false);
+                
+                // Second verification should be cached
+                const result2 = await service.verifyMessageSignature(message, testPublicKey, "test-signature");
+                expect(result2.cached).toBe(true);
+            });
+
+            it("should handle signature verification failures", async () => {
+                const service = broker.getLocalService("message");
+                const message = "Test message for invalid signature";
+                
+                // Mock nucleus service to return false (invalid signature)
+                jest.spyOn(service.broker, 'call').mockResolvedValue(false);
+                
+                const result = await service.verifyMessageSignature(message, testPublicKey, "invalid-signature");
+                
+                expect(result.valid).toBe(false);
+                expect(result.cached).toBe(false);
+            });
+        });
+
+        describe("Suspicious Activity Tracking", () => {
+            it("should track suspicious events", () => {
+                const service = broker.getLocalService("message");
+                
+                service.trackSuspiciousActivity(testPeerUUID, "invalid_signature", {
+                    messageId: "test-123",
+                    context: "message"
+                });
+                
+                const activity = service.suspiciousActivity.get(testPeerUUID);
+                expect(activity.events).toHaveLength(1);
+                expect(activity.events[0].type).toBe("invalid_signature");
+                expect(activity.score).toBeGreaterThan(0);
+            });
+
+            it("should calculate suspicion scores correctly", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add multiple suspicious events
+                service.trackSuspiciousActivity(testPeerUUID, "invalid_signature", {});
+                service.trackSuspiciousActivity(testPeerUUID, "rate_limit_exceeded", {});
+                service.trackSuspiciousActivity(testPeerUUID, "spam_detected", {});
+                
+                const activity = service.suspiciousActivity.get(testPeerUUID);
+                expect(activity.score).toBeGreaterThan(30); // 15 + 5 + 20
+            });
+
+            it("should auto-block peers with high suspicion scores", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add enough suspicious events to trigger auto-block
+                for (let i = 0; i < 10; i++) {
+                    service.trackSuspiciousActivity(testPeerUUID, "invalid_signature", {});
+                }
+                
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(true);
+            });
+
+            it("should downgrade trust for moderate suspicion", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add peer to discovered peers with trusted status
+                service.discoveredPeers.set(testPeerUUID, {
+                    trustLevel: "trusted",
+                    uuid: testPeerUUID
+                });
+                service.trustedPeers.add(testPeerUUID);
+                
+                // Add moderate suspicious activity
+                for (let i = 0; i < 5; i++) {
+                    service.trackSuspiciousActivity(testPeerUUID, "invalid_signature", {});
+                }
+                
+                const peerInfo = service.discoveredPeers.get(testPeerUUID);
+                expect(peerInfo.trustLevel).toBe("unknown");
+                expect(service.trustedPeers.has(testPeerUUID)).toBe(false);
+            });
+        });
+
+        describe("Security API Endpoints", () => {
+            it("should block peers via API", async () => {
+                const result = await broker.call("message.blockPeer", {
+                    peerUUID: testPeerUUID,
+                    reason: "Test blocking via API"
+                });
+                
+                expect(result.success).toBe(true);
+                expect(result.peerUUID).toBe(testPeerUUID);
+                expect(result.reason).toBe("Test blocking via API");
+                
+                const service = broker.getLocalService("message");
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(true);
+            });
+
+            it("should unblock peers via API", async () => {
+                const service = broker.getLocalService("message");
+                
+                // First block the peer
+                service.blockPeer(testPeerUUID, "Test");
+                
+                // Then unblock via API
+                const result = await broker.call("message.unblockPeer", {
+                    peerUUID: testPeerUUID
+                });
+                
+                expect(result.success).toBe(true);
+                expect(service.isPeerBlocked(testPeerUUID)).toBe(false);
+            });
+
+            it("should get security status for specific peer", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Set up some test data
+                service.updateSpamScore(testPeerUUID, 25, "Test violation");
+                service.trackSuspiciousActivity(testPeerUUID, "invalid_signature", {});
+                
+                const result = await broker.call("message.getSecurityStatus", {
+                    peerUUID: testPeerUUID
+                });
+                
+                expect(result.peerUUID).toBe(testPeerUUID);
+                expect(result.isBlocked).toBe(false);
+                expect(result.spamScore).toBe(25);
+                expect(result.suspiciousActivityScore).toBeGreaterThan(0);
+            });
+
+            it("should get overall security status", async () => {
+                const result = await broker.call("message.getSecurityStatus");
+                
+                expect(result).toHaveProperty("totalBlockedPeers");
+                expect(result).toHaveProperty("totalPeersWithSpamScore");
+                expect(result).toHaveProperty("totalPeersWithSuspiciousActivity");
+                expect(result).toHaveProperty("securitySettings");
+                expect(result).toHaveProperty("blockedPeers");
+            });
+
+            it("should get comprehensive security metrics", async () => {
+                const result = await broker.call("message.getSecurityMetrics");
+                
+                expect(result).toHaveProperty("overview");
+                expect(result).toHaveProperty("recentActivity");
+                expect(result).toHaveProperty("trustDistribution");
+                expect(result).toHaveProperty("spamScoreDistribution");
+                expect(result).toHaveProperty("settings");
+                expect(result).toHaveProperty("cacheStats");
+            });
+
+            it("should check spam via API", async () => {
+                const spamMessage = "This is a spam message with scam content";
+                
+                const result = await broker.call("message.checkSpam", {
+                    message: spamMessage,
+                    senderUUID: testPeerUUID
+                });
+                
+                expect(result.isSpam).toBe(true);
+                expect(result.confidence).toBeGreaterThan(60);
+                expect(result.reasons).toContain("Suspicious keywords: spam, scam");
+                expect(result.messageLength).toBe(spamMessage.length);
+                expect(result.senderUUID).toBe(testPeerUUID);
+            });
+        });
+
+        describe("Security Data Cleanup", () => {
+            it("should cleanup old security data", () => {
+                const service = broker.getLocalService("message");
+                
+                // Add old data
+                const oldRateLimiter = {
+                    messageCount: 5,
+                    lastReset: Date.now() - (25 * 60 * 60 * 1000) // 25 hours ago
+                };
+                service.rateLimiters.set(testPeerUUID, oldRateLimiter);
+                
+                const oldSpamData = {
+                    score: 0,
+                    lastUpdate: Date.now() - (25 * 60 * 60 * 1000) // 25 hours ago
+                };
+                service.spamScores.set(testPeerUUID, oldSpamData);
+                
+                // Run cleanup
+                service.cleanupSecurityData();
+                
+                // Old data should be removed
+                expect(service.rateLimiters.has(testPeerUUID)).toBe(false);
+                expect(service.spamScores.has(testPeerUUID)).toBe(false);
+            });
+        });
+
+        describe("Security Integration with Message Flow", () => {
+            it("should apply security checks during message sending", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Block the target peer
+                service.blockPeer(testPeerUUID, "Integration test");
+                
+                // Try to send message - should be blocked
+                try {
+                    await broker.call("message.sendMessage", {
+                        targetUUID: testPeerUUID,
+                        message: "Test message",
+                        recipientPublicKey: testPublicKey
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Cannot send message to blocked peer");
+                }
+            });
+
+            it("should apply rate limiting during message sending", async () => {
+                const service = broker.getLocalService("message");
+                
+                // Exceed rate limit
+                for (let i = 0; i < 10; i++) {
+                    service.checkRateLimit(service.cellUUID, 'message');
+                }
+                
+                // Try to send message - should be rate limited
+                try {
+                    await broker.call("message.sendMessage", {
+                        targetUUID: testPeerUUID,
+                        message: "Test message",
+                        recipientPublicKey: testPublicKey
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Rate limit exceeded");
+                    expect(err.code).toBe("RATE_LIMIT_EXCEEDED");
+                }
+            });
+
+            it("should apply spam detection during message sending", async () => {
+                const service = broker.getLocalService("message");
+                const spamMessage = "This is a spam message with scam content and phishing links";
+                
+                // Try to send spam message - should be blocked
+                try {
+                    await broker.call("message.sendMessage", {
+                        targetUUID: testPeerUUID,
+                        message: spamMessage,
+                        recipientPublicKey: testPublicKey
+                    });
+                    expect(true).toBe(false); // Should not reach here
+                } catch (err) {
+                    expect(err.message).toContain("Message blocked as potential spam");
+                }
+            });
+        });
+    });
 }); 

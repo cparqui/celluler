@@ -91,11 +91,13 @@
     - [x] Handle trust levels and access control
     - [x] Add spam prevention and rate limiting
   - [ ] Unit tests and integration tests
-    - [ ] Test topic-based core management
-    - [ ] Test direct messaging with encryption/signing
-    - [ ] Test per-cell inbox system and access control
-    - [ ] Test three-layer discovery system
-    - [ ] Test identity journal integration
+    - [x] Test topic-based core management
+    - [x] Test direct messaging with encryption/signing
+    - [x] Test per-cell inbox system and access control
+    - [x] Test three-layer discovery system
+    - [x] Test identity journal integration
+    - [x] Test security and spam prevention features
+    - [x] Set up comprehensive integration testing environment
 
 - [ ] IdentityService
   - [ ] Cell identity verification
