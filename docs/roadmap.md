@@ -85,11 +85,11 @@
     - [x] Implement delivery confirmation and retry logic
     - [x] Handle message ordering and deduplication
     - [x] Add support for offline peer message delivery
-  - [ ] Security and encryption
-    - [ ] Implement end-to-end encryption for private messages
-    - [ ] Add digital signature verification for all messages
-    - [ ] Handle trust levels and access control
-    - [ ] Add spam prevention and rate limiting
+  - [x] Security and encryption
+    - [x] Implement end-to-end encryption for private messages
+    - [x] Add digital signature verification for all messages
+    - [x] Handle trust levels and access control
+    - [x] Add spam prevention and rate limiting
   - [ ] Unit tests and integration tests
     - [ ] Test topic-based core management
     - [ ] Test direct messaging with encryption/signing

@@ -7,7 +7,7 @@ import crypto from 'crypto';
 const TOPIC_TYPES = {
   DIRECT: "direct",
   INBOX: "inbox", 
-  PEER_CACHE: "peer_cache",
+  PEER_CACHE: "peers",
   JOURNAL: "journal"
 };
 
@@ -73,6 +73,25 @@ const RELATIONSHIP_STATUS = {
   CONNECTED: "connected",
   PENDING: "pending",
   DISCONNECTED: "disconnected"
+};
+
+// Security and spam prevention constants
+const SPAM_DETECTION = {
+  MAX_MESSAGES_PER_MINUTE: 10,
+  MAX_MESSAGES_PER_HOUR: 100,
+  MAX_MESSAGE_SIZE: 10 * 1024, // 10KB
+  SUSPICIOUS_KEYWORDS: ['spam', 'scam', 'phishing', 'malware'],
+  REPUTATION_THRESHOLD: -10,
+  COOLDOWN_PERIOD: 60 * 1000 // 1 minute
+};
+
+const RATE_LIMITING = {
+  MESSAGE_BURST: 5,           // Max 5 messages in burst
+  MESSAGE_WINDOW: 60 * 1000,  // 1 minute window
+  NOTIFICATION_BURST: 20,     // Max 20 notifications in burst
+  NOTIFICATION_WINDOW: 60 * 1000, // 1 minute window
+  HANDSHAKE_BURST: 10,        // Max 10 handshakes in burst
+  HANDSHAKE_WINDOW: 5 * 60 * 1000 // 5 minute window
 };
 
 // Parameter validation objects
@@ -354,6 +373,20 @@ const DEFAULT_SETTINGS = {
     // Security settings
     requireEncryption: true,
     requireSignature: true,
+    enableSpamPrevention: true,
+    enableRateLimiting: true,
+    
+    // Spam prevention settings
+    spamDetection: {
+        ...SPAM_DETECTION,
+        enabled: true
+    },
+    
+    // Rate limiting settings
+    rateLimiting: {
+        ...RATE_LIMITING,
+        enabled: true
+    },
     
     // Performance settings
     cacheSize: 500,
@@ -602,6 +635,77 @@ export default class MessageService extends BaseService {
                         method: "GET",
                         path: "/delivery-stats"
                     }
+                },
+                
+                // Security endpoints
+                blockPeer: {
+                    params: {
+                        peerUUID: {
+                            type: "string",
+                            min: 1
+                        },
+                        reason: {
+                            type: "string",
+                            min: 1
+                        }
+                    },
+                    handler: this.blockPeerAction,
+                    rest: {
+                        method: "POST",
+                        path: "/security/block"
+                    }
+                },
+                unblockPeer: {
+                    params: {
+                        peerUUID: {
+                            type: "string",
+                            min: 1
+                        }
+                    },
+                    handler: this.unblockPeerAction,
+                    rest: {
+                        method: "POST",
+                        path: "/security/unblock"
+                    }
+                },
+                getSecurityStatus: {
+                    params: {
+                        peerUUID: {
+                            type: "string",
+                            min: 1,
+                            optional: true
+                        }
+                    },
+                    handler: this.getSecurityStatus,
+                    rest: {
+                        method: "GET",
+                        path: "/security/status"
+                    }
+                },
+                getSecurityMetrics: {
+                    handler: this.getSecurityMetrics,
+                    rest: {
+                        method: "GET",
+                        path: "/security/metrics"
+                    }
+                },
+                checkSpam: {
+                    params: {
+                        message: {
+                            type: "string",
+                            min: 1
+                        },
+                        senderUUID: {
+                            type: "string",
+                            min: 1,
+                            optional: true
+                        }
+                    },
+                    handler: this.checkSpamAction,
+                    rest: {
+                        method: "POST",
+                        path: "/security/check-spam"
+                    }
                 }
             },
             events: {
@@ -648,6 +752,14 @@ export default class MessageService extends BaseService {
         this.pendingHandshakes = new Map(); // Ongoing handshakes: connectionId -> { peer, timestamp }
         this.discoverySwarms = new Map(); // Active discovery swarms: topic -> swarm info
         this.capabilities = ["messaging"]; // This cell's capabilities
+        
+        // Security and spam prevention
+        this.rateLimiters = new Map(); // peerUUID -> { messageCount, lastReset, notificationCount, handshakeCount }
+        this.spamScores = new Map(); // peerUUID -> { score, lastUpdate, violations }
+        this.blockedPeers = new Set(); // UUIDs of peers blocked for spam/abuse
+        this.suspiciousActivity = new Map(); // peerUUID -> { events: [], score: number }
+        this.messageHashes = new Set(); // Recent message content hashes for duplicate detection
+        this.signatureCache = new Map(); // publicKey -> { validSignatures: Set, invalidSignatures: Set }
     }
 
     // Lifecycle events
@@ -661,6 +773,8 @@ export default class MessageService extends BaseService {
         // Start cleanup timer
         this.cleanupTimer = setInterval(() => {
             this.cleanupExpiredTopics();
+            this.cleanupDeduplicationCache();
+            this.cleanupSecurityData();
         }, this.settings.cleanupInterval);
         
         // Start offline message processing timer
@@ -821,6 +935,31 @@ export default class MessageService extends BaseService {
             throw new Error("Cell not initialized - missing UUID");
         }
         
+        // Security checks
+        if (this.isPeerBlocked(targetUUID)) {
+            throw new Error(`Cannot send message to blocked peer: ${targetUUID}`);
+        }
+        
+        // Rate limiting check
+        const rateLimitCheck = this.checkRateLimit(this.cellUUID, 'message');
+        if (!rateLimitCheck.allowed) {
+            const error = new Error(`Rate limit exceeded. Try again in ${Math.ceil(rateLimitCheck.remainingTime / 1000)} seconds`);
+            error.code = 'RATE_LIMIT_EXCEEDED';
+            error.remainingTime = rateLimitCheck.remainingTime;
+            throw error;
+        }
+        
+        // Spam detection
+        const spamCheck = this.detectSpam(message, this.cellUUID);
+        if (spamCheck.isSpam) {
+            this.updateSpamScore(this.cellUUID, spamCheck.spamScore, `Spam detected: ${spamCheck.reasons.join(', ')}`);
+            this.trackSuspiciousActivity(this.cellUUID, 'spam_detected', {
+                confidence: spamCheck.confidence,
+                reasons: spamCheck.reasons
+            });
+            throw new Error(`Message blocked as potential spam: ${spamCheck.reasons.join(', ')}`);
+        }
+        
         try {
             // Generate topic name for direct message
             const topic = this.generateTopicName(TOPIC_TYPES.DIRECT, this.cellUUID, targetUUID);
@@ -927,8 +1066,32 @@ export default class MessageService extends BaseService {
                     
                     // Try to decrypt message using nucleus service
                     let decryptedMessage = null;
+                    let signatureValid = false;
+                    
                     try {
                         if (messageData.encrypted && messageData.signature) {
+                            // Verify signature first
+                            const signatureCheck = await this.verifyMessageSignature(
+                                messageData.encrypted, 
+                                messageData.senderPublicKey, 
+                                messageData.signature
+                            );
+                            
+                            signatureValid = signatureCheck.valid;
+                            
+                            if (!signatureValid) {
+                                this.trackSuspiciousActivity(messageData.from || 'unknown', 'invalid_signature', {
+                                    messageId: messageData.messageId,
+                                    cached: signatureCheck.cached
+                                });
+                                this.logger.warn("Invalid message signature detected", { 
+                                    messageId: messageData.messageId,
+                                    sender: messageData.from 
+                                });
+                            }
+                            
+                            // Only decrypt if signature is valid
+                            if (signatureValid) {
                             const decrypted = await this.broker.call("nucleus.decryptFromCell", {
                                 sourcePublicKey: messageData.senderPublicKey,
                                 encryptedData: {
@@ -937,6 +1100,13 @@ export default class MessageService extends BaseService {
                                 }
                             });
                             decryptedMessage = JSON.parse(decrypted);
+                                
+                                // Check if sender is blocked after decryption
+                                if (decryptedMessage.from && this.isPeerBlocked(decryptedMessage.from)) {
+                                    this.logger.warn(`Received message from blocked peer: ${decryptedMessage.from}`);
+                                    continue; // Skip this message
+                                }
+                            }
                         }
                     } catch (decryptErr) {
                         this.logger.debug("Could not decrypt message (not intended for this recipient)");
@@ -950,7 +1120,8 @@ export default class MessageService extends BaseService {
                         content: decryptedMessage?.content || null,
                         timestamp: messageData.timestamp,
                         encrypted: !decryptedMessage,
-                        verified: true // nucleus service handles signature verification
+                        verified: signatureValid,
+                        signatureValid
                     };
                     
                     messages.push(messageInfo);
@@ -984,6 +1155,20 @@ export default class MessageService extends BaseService {
         
         if (!this.cellUUID) {
             throw new Error("Cell not initialized - missing UUID");
+        }
+        
+        // Security checks
+        if (this.isPeerBlocked(targetUUID)) {
+            throw new Error(`Cannot send notification to blocked peer: ${targetUUID}`);
+        }
+        
+        // Rate limiting check for notifications
+        const rateLimitCheck = this.checkRateLimit(this.cellUUID, 'notification');
+        if (!rateLimitCheck.allowed) {
+            const error = new Error(`Notification rate limit exceeded. Try again in ${Math.ceil(rateLimitCheck.remainingTime / 1000)} seconds`);
+            error.code = 'RATE_LIMIT_EXCEEDED';
+            error.remainingTime = rateLimitCheck.remainingTime;
+            throw error;
         }
         
         try {
@@ -1687,31 +1872,267 @@ export default class MessageService extends BaseService {
     
     async getDeliveryStats(ctx) {
         try {
-            const stats = { ...this.deliveryStats };
+            // Calculate delivery rate and average delivery time
+            const totalMessages = this.deliveryStats.totalSent + this.deliveryStats.totalDelivered + this.deliveryStats.totalFailed;
+            const deliveryRate = totalMessages > 0 ? ((this.deliveryStats.totalDelivered / totalMessages) * 100).toFixed(2) : 0;
             
-            // Calculate average delivery time
-            if (stats.deliveryTimes.length > 0) {
-                stats.averageDeliveryTime = stats.deliveryTimes.reduce((sum, time) => sum + time, 0) / stats.deliveryTimes.length;
-            } else {
-                stats.averageDeliveryTime = 0;
-            }
+            const averageDeliveryTime = this.deliveryStats.deliveryTimes.length > 0 
+                ? (this.deliveryStats.deliveryTimes.reduce((sum, time) => sum + time, 0) / this.deliveryStats.deliveryTimes.length).toFixed(2)
+                : 0;
             
-            // Calculate delivery rate
-            const totalMessages = stats.totalSent;
-            stats.deliveryRate = totalMessages > 0 ? (stats.totalDelivered / totalMessages) * 100 : 0;
+            const retryRate = this.deliveryStats.totalSent > 0 
+                ? ((this.deliveryStats.totalFailed / this.deliveryStats.totalSent) * 100).toFixed(2)
+                : 0;
             
-            // Calculate retry rate
-            const totalRetries = Array.from(this.messageMetadata.values())
-                .reduce((sum, metadata) => sum + metadata.retryCount, 0);
-            stats.retryRate = totalMessages > 0 ? (totalRetries / totalMessages) * 100 : 0;
-            
-            // Remove raw delivery times from response (too verbose)
-            delete stats.deliveryTimes;
-            
-            return stats;
+            return {
+                totalSent: this.deliveryStats.totalSent,
+                totalDelivered: this.deliveryStats.totalDelivered,
+                totalFailed: this.deliveryStats.totalFailed,
+                totalPending: this.deliveryStats.totalPending,
+                deliveryRate: parseFloat(deliveryRate),
+                averageDeliveryTime: parseFloat(averageDeliveryTime),
+                retryRate: parseFloat(retryRate),
+                timestamp: new Date().toISOString()
+            };
             
         } catch (err) {
             this.logger.error("Failed to get delivery stats:", err);
+            throw err;
+        }
+    }
+    
+    // Security Action Handlers
+    
+    async blockPeerAction(ctx) {
+        const { peerUUID, reason } = ctx.params;
+        
+        try {
+            this.blockPeer(peerUUID, reason);
+            
+            return {
+                success: true,
+                peerUUID,
+                reason,
+                timestamp: new Date().toISOString()
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to block peer:", err);
+            throw err;
+        }
+    }
+    
+    async unblockPeerAction(ctx) {
+        const { peerUUID } = ctx.params;
+        
+        try {
+            // Remove from blocked peers
+            this.blockedPeers.delete(peerUUID);
+            
+            // Update peer trust level back to unknown
+            const peerInfo = this.discoveredPeers.get(peerUUID);
+            if (peerInfo) {
+                peerInfo.trustLevel = TRUST_LEVELS.UNKNOWN;
+                delete peerInfo.blockReason;
+                delete peerInfo.blockedAt;
+                peerInfo.lastUpdated = new Date().toISOString();
+                this.discoveredPeers.set(peerUUID, peerInfo);
+            }
+            
+            // Reset spam score
+            this.spamScores.delete(peerUUID);
+            
+            // Clear suspicious activity
+            this.suspiciousActivity.delete(peerUUID);
+            
+            this.logger.info(`Unblocked peer: ${peerUUID}`);
+            
+            // Log security event
+            await this.logSecurityEvent('peer_unblocked', {
+                peerUUID,
+                timestamp: new Date().toISOString()
+            });
+            
+            return {
+                success: true,
+                peerUUID,
+                timestamp: new Date().toISOString()
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to unblock peer:", err);
+            throw err;
+        }
+    }
+    
+    async getSecurityStatus(ctx) {
+        const { peerUUID } = ctx.params;
+        
+        try {
+            if (peerUUID) {
+                // Get status for specific peer
+                const peerInfo = this.discoveredPeers.get(peerUUID);
+                const spamScore = this.spamScores.get(peerUUID);
+                const rateLimiter = this.rateLimiters.get(peerUUID);
+                const suspiciousActivity = this.suspiciousActivity.get(peerUUID);
+                
+                return {
+                    peerUUID,
+                    isBlocked: this.isPeerBlocked(peerUUID),
+                    trustLevel: peerInfo?.trustLevel || TRUST_LEVELS.UNKNOWN,
+                    spamScore: spamScore?.score || 0,
+                    spamViolations: spamScore?.violations || [],
+                    rateLimitStatus: rateLimiter ? {
+                        messageCount: rateLimiter.messageCount,
+                        notificationCount: rateLimiter.notificationCount,
+                        handshakeCount: rateLimiter.handshakeCount,
+                        lastReset: rateLimiter.lastReset
+                    } : null,
+                    suspiciousActivityScore: suspiciousActivity?.score || 0,
+                    recentSuspiciousEvents: suspiciousActivity?.events?.slice(-5) || [],
+                    lastSeen: peerInfo?.lastSeen || null
+                };
+            } else {
+                // Get overall security status
+                return {
+                    totalBlockedPeers: this.blockedPeers.size,
+                    totalPeersWithSpamScore: this.spamScores.size,
+                    totalPeersWithSuspiciousActivity: this.suspiciousActivity.size,
+                    securitySettings: {
+                        spamDetectionEnabled: this.settings.spamDetection.enabled,
+                        rateLimitingEnabled: this.settings.rateLimiting.enabled,
+                        requireSignature: this.settings.requireSignature,
+                        requireEncryption: this.settings.requireEncryption
+                    },
+                    blockedPeers: Array.from(this.blockedPeers),
+                    timestamp: new Date().toISOString()
+                };
+            }
+            
+        } catch (err) {
+            this.logger.error("Failed to get security status:", err);
+            throw err;
+        }
+    }
+    
+    async getSecurityMetrics(ctx) {
+        try {
+            // Calculate various security metrics
+            const now = Date.now();
+            const dayAgo = now - (24 * 60 * 60 * 1000);
+            
+            // Count recent security events
+            let recentSpamAttempts = 0;
+            let recentInvalidSignatures = 0;
+            let recentRateLimitExceeded = 0;
+            let recentFailedHandshakes = 0;
+            
+            for (const [peerUUID, activity] of this.suspiciousActivity.entries()) {
+                const recentEvents = activity.events.filter(event => event.timestamp > dayAgo);
+                recentEvents.forEach(event => {
+                    switch (event.type) {
+                        case 'spam_detected':
+                            recentSpamAttempts++;
+                            break;
+                        case 'invalid_signature':
+                            recentInvalidSignatures++;
+                            break;
+                        case 'rate_limit_exceeded':
+                            recentRateLimitExceeded++;
+                            break;
+                        case 'failed_handshake':
+                            recentFailedHandshakes++;
+                            break;
+                    }
+                });
+            }
+            
+            // Calculate trust distribution
+            const trustDistribution = {
+                [TRUST_LEVELS.TRUSTED]: 0,
+                [TRUST_LEVELS.UNKNOWN]: 0,
+                [TRUST_LEVELS.BLOCKED]: 0
+            };
+            
+            for (const [peerUUID, peerInfo] of this.discoveredPeers.entries()) {
+                trustDistribution[peerInfo.trustLevel]++;
+            }
+            
+            // Calculate spam score distribution
+            const spamScoreRanges = {
+                low: 0,      // 0-20
+                medium: 0,   // 21-50
+                high: 0,     // 51-100
+                extreme: 0   // 100+
+            };
+            
+            for (const [peerUUID, spamData] of this.spamScores.entries()) {
+                const score = spamData.score;
+                if (score <= 20) spamScoreRanges.low++;
+                else if (score <= 50) spamScoreRanges.medium++;
+                else if (score <= 100) spamScoreRanges.high++;
+                else spamScoreRanges.extreme++;
+            }
+            
+            return {
+                overview: {
+                    totalPeers: this.discoveredPeers.size,
+                    blockedPeers: this.blockedPeers.size,
+                    trustedPeers: this.trustedPeers.size,
+                    peersWithSpamScore: this.spamScores.size,
+                    peersWithSuspiciousActivity: this.suspiciousActivity.size
+                },
+                recentActivity: {
+                    period: "24 hours",
+                    spamAttempts: recentSpamAttempts,
+                    invalidSignatures: recentInvalidSignatures,
+                    rateLimitExceeded: recentRateLimitExceeded,
+                    failedHandshakes: recentFailedHandshakes
+                },
+                trustDistribution,
+                spamScoreDistribution: spamScoreRanges,
+                settings: {
+                    spamDetection: this.settings.spamDetection,
+                    rateLimiting: this.settings.rateLimiting,
+                    securityFeatures: {
+                        requireSignature: this.settings.requireSignature,
+                        requireEncryption: this.settings.requireEncryption,
+                        enableSpamPrevention: this.settings.enableSpamPrevention,
+                        enableRateLimiting: this.settings.enableRateLimiting
+                    }
+                },
+                cacheStats: {
+                    signatureCacheSize: this.signatureCache.size,
+                    messageHashesSize: this.messageHashes.size,
+                    rateLimitersSize: this.rateLimiters.size
+                },
+                timestamp: new Date().toISOString()
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to get security metrics:", err);
+            throw err;
+        }
+    }
+    
+    async checkSpamAction(ctx) {
+        const { message, senderUUID } = ctx.params;
+        
+        try {
+            const spamCheck = this.detectSpam(message, senderUUID || 'unknown');
+            
+            return {
+                isSpam: spamCheck.isSpam,
+                confidence: spamCheck.confidence,
+                spamScore: spamCheck.spamScore,
+                reasons: spamCheck.reasons,
+                timestamp: new Date().toISOString(),
+                messageLength: message.length,
+                senderUUID: senderUUID || 'unknown'
+            };
+            
+        } catch (err) {
+            this.logger.error("Failed to check spam:", err);
             throw err;
         }
     }
@@ -2233,13 +2654,20 @@ export default class MessageService extends BaseService {
         this.logger.info("Incoming peer connection handler (placeholder):", peerInfo);
     }
 
-    async performHandshake(connection) {
-        // Placeholder for performing identity handshake
-        // In a full implementation, this would:
-        // 1. Send handshake message with cell info
-        // 2. Receive and verify peer's handshake
-        // 3. Exchange discovery keys and capabilities
-        // 4. Establish connection trust level
+    async performHandshake(connection, peerUUID = null) {
+        try {
+            // Rate limiting check for handshakes
+            const handshakeRateCheck = this.checkRateLimit(this.cellUUID, 'handshake');
+            if (!handshakeRateCheck.allowed) {
+                this.logger.warn(`Handshake rate limit exceeded. Remaining time: ${handshakeRateCheck.remainingTime}ms`);
+                throw new Error('Handshake rate limit exceeded');
+            }
+            
+            // Check if target peer is blocked (if we know who they are)
+            if (peerUUID && this.isPeerBlocked(peerUUID)) {
+                this.logger.warn(`Attempted handshake with blocked peer: ${peerUUID}`);
+                throw new Error('Peer is blocked');
+            }
         
         // Get journal discovery key from nucleus service
         let journalDiscoveryKey = 'not-available';
@@ -2251,7 +2679,7 @@ export default class MessageService extends BaseService {
         }
         
         const handshakeMessage = {
-            version: HANDSHAKE_VERSION,
+                version: "1.0", // HANDSHAKE_VERSION constant not defined yet
             uuid: this.cellUUID,
             publicKey: this.cellPublicKey,
             inboxDiscoveryKey: this.inboxAutobase?.discoveryKey?.toString('hex') || 'not-available',
@@ -2267,15 +2695,161 @@ export default class MessageService extends BaseService {
         
         // Log handshake to journal
         await this.logHandshakeRecord(
-            "unknown-peer", // Will be updated when we know the peer UUID
+                peerUUID || "unknown-peer",
             "outgoing",
             true,
             this.capabilities
         );
         
-        this.logger.info("Handshake created (placeholder):", handshakeMessage);
+            this.logger.info("Handshake created with security checks:", {
+                targetPeer: peerUUID || "unknown",
+                version: handshakeMessage.version,
+                capabilities: this.capabilities.length
+            });
         
         return handshakeMessage;
+            
+        } catch (err) {
+            // Track failed handshake as suspicious activity
+            if (peerUUID) {
+                this.trackSuspiciousActivity(peerUUID, 'failed_handshake', {
+                    reason: err.message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
+            // Log failed handshake to journal
+            await this.logHandshakeRecord(
+                peerUUID || "unknown-peer",
+                "outgoing",
+                false,
+                []
+            );
+            
+            this.logger.error("Handshake failed:", err);
+            throw err;
+        }
+    }
+    
+    /**
+     * Process and validate incoming handshake messages
+     */
+    async processIncomingHandshake(handshakeMessage, connectionInfo) {
+        try {
+            const { uuid: peerUUID, publicKey, signature, timestamp } = handshakeMessage;
+            
+            // Basic validation
+            if (!peerUUID || !publicKey || !signature) {
+                throw new Error('Invalid handshake format');
+            }
+            
+            // Check if peer is blocked
+            if (this.isPeerBlocked(peerUUID)) {
+                this.logger.warn(`Rejected handshake from blocked peer: ${peerUUID}`);
+                throw new Error('Peer is blocked');
+            }
+            
+            // Rate limiting check for incoming handshakes
+            const handshakeRateCheck = this.checkRateLimit(peerUUID, 'handshake');
+            if (!handshakeRateCheck.allowed) {
+                this.trackSuspiciousActivity(peerUUID, 'rate_limit_exceeded', {
+                    action: 'handshake',
+                    remainingTime: handshakeRateCheck.remainingTime
+                });
+                throw new Error('Handshake rate limit exceeded for peer');
+            }
+            
+            // Verify handshake signature
+            const signatureCheck = await this.verifyMessageSignature(
+                JSON.stringify(handshakeMessage),
+                publicKey,
+                signature
+            );
+            
+            if (!signatureCheck.valid) {
+                this.trackSuspiciousActivity(peerUUID, 'invalid_signature', {
+                    context: 'handshake',
+                    cached: signatureCheck.cached
+                });
+                throw new Error('Invalid handshake signature');
+            }
+            
+            // Check timestamp (prevent replay attacks)
+            const handshakeTime = new Date(timestamp).getTime();
+            const now = Date.now();
+            const timeDiff = Math.abs(now - handshakeTime);
+            
+            if (timeDiff > 5 * 60 * 1000) { // 5 minutes tolerance
+                this.trackSuspiciousActivity(peerUUID, 'stale_handshake', {
+                    timeDiff,
+                    handshakeTime,
+                    currentTime: now
+                });
+                throw new Error('Handshake timestamp too old');
+            }
+            
+            // Update peer information
+            const peerInfo = {
+                uuid: peerUUID,
+                publicKey,
+                inboxDiscoveryKey: handshakeMessage.inboxDiscoveryKey,
+                journalDiscoveryKey: handshakeMessage.journalDiscoveryKey,
+                capabilities: handshakeMessage.capabilities || [],
+                trustLevel: TRUST_LEVELS.UNKNOWN, // Start as unknown
+                relationshipStatus: RELATIONSHIP_STATUS.CONNECTED,
+                lastSeen: new Date().toISOString(),
+                connectionHistory: [
+                    {
+                        timestamp: new Date().toISOString(),
+                        event: "handshake_success",
+                        success: true
+                    }
+                ],
+                signature: signature
+            };
+            
+            // Store peer information
+            this.discoveredPeers.set(peerUUID, peerInfo);
+            
+            // Update peer cache if available
+            if (this.peerCache) {
+                const key = `peer:${peerUUID}`;
+                await this.peerCache.put(key, JSON.stringify(peerInfo));
+            }
+            
+            // Log successful handshake
+            await this.logHandshakeRecord(
+                peerUUID,
+                "incoming",
+                true,
+                handshakeMessage.capabilities || []
+            );
+            
+            this.logger.info(`Handshake successful with peer: ${peerUUID}`, {
+                capabilities: handshakeMessage.capabilities?.length || 0,
+                trustLevel: peerInfo.trustLevel
+            });
+            
+            return {
+                success: true,
+                peerUUID,
+                peerInfo,
+                capabilities: handshakeMessage.capabilities || []
+            };
+            
+        } catch (err) {
+            // Log failed handshake
+            const peerUUID = handshakeMessage?.uuid || 'unknown';
+            await this.logHandshakeRecord(
+                peerUUID,
+                "incoming",
+                false,
+                []
+            );
+            
+            this.logger.error("Incoming handshake failed:", err);
+            throw err;
+        }
     }
 
     // Journal Integration Methods
@@ -2823,15 +3397,449 @@ export default class MessageService extends BaseService {
     }
     
     updatePeerStatus(peerUUID, status) {
-        const existing = this.peerStatus.get(peerUUID) || {};
+        const now = Date.now();
+        const currentStatus = this.peerStatus.get(peerUUID) || { status: 'unknown', lastSeen: 0 };
         
         this.peerStatus.set(peerUUID, {
-            ...existing,
+            ...currentStatus,
             status,
-            lastSeen: new Date().toISOString(),
-            lastStatusUpdate: new Date().toISOString()
+            lastSeen: now,
+            lastUpdate: now
         });
         
         this.logger.debug(`Updated peer status: ${peerUUID} -> ${status}`);
+    }
+    
+    // Security and Spam Prevention Methods
+    
+    /**
+     * Check if a peer is rate limited for a specific action
+     */
+    checkRateLimit(peerUUID, action = 'message') {
+        if (!this.settings.rateLimiting.enabled) {
+            return { allowed: true, remainingTime: 0 };
+        }
+        
+        const now = Date.now();
+        const rateLimiter = this.rateLimiters.get(peerUUID) || {
+            messageCount: 0,
+            notificationCount: 0,
+            handshakeCount: 0,
+            lastReset: now
+        };
+        
+        // Determine limits based on action type
+        let burst, window, currentCount;
+        switch (action) {
+            case 'message':
+                burst = this.settings.rateLimiting.MESSAGE_BURST;
+                window = this.settings.rateLimiting.MESSAGE_WINDOW;
+                currentCount = rateLimiter.messageCount;
+                break;
+            case 'notification':
+                burst = this.settings.rateLimiting.NOTIFICATION_BURST;
+                window = this.settings.rateLimiting.NOTIFICATION_WINDOW;
+                currentCount = rateLimiter.notificationCount;
+                break;
+            case 'handshake':
+                burst = this.settings.rateLimiting.HANDSHAKE_BURST;
+                window = this.settings.rateLimiting.HANDSHAKE_WINDOW;
+                currentCount = rateLimiter.handshakeCount;
+                break;
+            default:
+                return { allowed: true, remainingTime: 0 };
+        }
+        
+        // Reset counter if window has passed
+        if (now - rateLimiter.lastReset > window) {
+            rateLimiter.messageCount = 0;
+            rateLimiter.notificationCount = 0;
+            rateLimiter.handshakeCount = 0;
+            rateLimiter.lastReset = now;
+            currentCount = 0;
+        }
+        
+        // Check if within limits
+        if (currentCount >= burst) {
+            const remainingTime = window - (now - rateLimiter.lastReset);
+            this.logger.warn(`Rate limit exceeded for ${peerUUID} (${action}): ${currentCount}/${burst}`);
+            return { allowed: false, remainingTime };
+        }
+        
+        // Increment counter
+        switch (action) {
+            case 'message':
+                rateLimiter.messageCount++;
+                break;
+            case 'notification':
+                rateLimiter.notificationCount++;
+                break;
+            case 'handshake':
+                rateLimiter.handshakeCount++;
+                break;
+        }
+        
+        this.rateLimiters.set(peerUUID, rateLimiter);
+        return { allowed: true, remainingTime: 0 };
+    }
+    
+    /**
+     * Detect potential spam in message content
+     */
+    detectSpam(messageContent, senderUUID) {
+        if (!this.settings.spamDetection.enabled) {
+            return { isSpam: false, confidence: 0, reasons: [] };
+        }
+        
+        const reasons = [];
+        let spamScore = 0;
+        
+        // Check message size
+        if (messageContent.length > this.settings.spamDetection.MAX_MESSAGE_SIZE) {
+            reasons.push('Message too large');
+            spamScore += 30;
+        }
+        
+        // Check for suspicious keywords
+        const lowerContent = messageContent.toLowerCase();
+        const foundKeywords = this.settings.spamDetection.SUSPICIOUS_KEYWORDS.filter(
+            keyword => lowerContent.includes(keyword)
+        );
+        
+        if (foundKeywords.length > 0) {
+            reasons.push(`Suspicious keywords: ${foundKeywords.join(', ')}`);
+            spamScore += foundKeywords.length * 20;
+        }
+        
+        // Check for excessive repetition
+        const words = messageContent.split(/\s+/);
+        const wordCounts = {};
+        words.forEach(word => {
+            wordCounts[word] = (wordCounts[word] || 0) + 1;
+        });
+        
+        const maxWordCount = Math.max(...Object.values(wordCounts));
+        if (maxWordCount > words.length * 0.3) {
+            reasons.push('Excessive word repetition');
+            spamScore += 25;
+        }
+        
+        // Check sender reputation
+        const senderSpamScore = this.spamScores.get(senderUUID);
+        if (senderSpamScore && senderSpamScore.score > this.settings.spamDetection.REPUTATION_THRESHOLD) {
+            reasons.push('Sender has poor reputation');
+            spamScore += Math.min(senderSpamScore.score, 50);
+        }
+        
+        // Check for duplicate content
+        const contentHash = this.hashMessage(messageContent);
+        if (this.messageHashes.has(contentHash)) {
+            reasons.push('Duplicate message content');
+            spamScore += 40;
+        } else {
+            this.messageHashes.add(contentHash);
+            // Clean up old hashes periodically
+            if (this.messageHashes.size > 1000) {
+                const hashes = Array.from(this.messageHashes);
+                this.messageHashes.clear();
+                // Keep last 500 hashes
+                hashes.slice(-500).forEach(hash => this.messageHashes.add(hash));
+            }
+        }
+        
+        const confidence = Math.min(spamScore, 100);
+        const isSpam = confidence > 60; // Threshold for spam classification
+        
+        return { isSpam, confidence, reasons, spamScore };
+    }
+    
+    /**
+     * Update spam score for a peer
+     */
+    updateSpamScore(peerUUID, scoreChange, reason) {
+        if (!this.settings.spamDetection.enabled) {
+            return;
+        }
+        
+        const now = Date.now();
+        const currentScore = this.spamScores.get(peerUUID) || {
+            score: 0,
+            lastUpdate: now,
+            violations: []
+        };
+        
+        currentScore.score += scoreChange;
+        currentScore.lastUpdate = now;
+        
+        if (scoreChange > 0) {
+            currentScore.violations.push({
+                timestamp: now,
+                reason,
+                scoreChange
+            });
+            
+            // Keep only recent violations (last 24 hours)
+            const dayAgo = now - (24 * 60 * 60 * 1000);
+            currentScore.violations = currentScore.violations.filter(v => v.timestamp > dayAgo);
+        }
+        
+        // Decay spam score over time (reduce by 1 point per hour)
+        const hoursElapsed = (now - currentScore.lastUpdate) / (60 * 60 * 1000);
+        currentScore.score = Math.max(0, currentScore.score - Math.floor(hoursElapsed));
+        
+        this.spamScores.set(peerUUID, currentScore);
+        
+        // Auto-block if score gets too high
+        if (currentScore.score > this.settings.spamDetection.REPUTATION_THRESHOLD * -2) {
+            this.blockPeer(peerUUID, 'Automatic block due to high spam score');
+        }
+        
+        this.logger.debug(`Updated spam score for ${peerUUID}: ${currentScore.score} (${reason})`);
+    }
+    
+    /**
+     * Block a peer for spam or abuse
+     */
+    blockPeer(peerUUID, reason) {
+        this.blockedPeers.add(peerUUID);
+        this.trustedPeers.delete(peerUUID);
+        
+        // Update peer trust level
+        const peerInfo = this.discoveredPeers.get(peerUUID);
+        if (peerInfo) {
+            peerInfo.trustLevel = TRUST_LEVELS.BLOCKED;
+            peerInfo.blockReason = reason;
+            peerInfo.blockedAt = new Date().toISOString();
+            this.discoveredPeers.set(peerUUID, peerInfo);
+        }
+        
+        this.logger.warn(`Blocked peer ${peerUUID}: ${reason}`);
+        
+        // Log to journal
+        this.logSecurityEvent('peer_blocked', {
+            peerUUID,
+            reason,
+            timestamp: new Date().toISOString()
+        });
+    }
+    
+    /**
+     * Check if a peer is blocked
+     */
+    isPeerBlocked(peerUUID) {
+        return this.blockedPeers.has(peerUUID);
+    }
+    
+    /**
+     * Enhanced signature verification with caching
+     */
+    async verifyMessageSignature(message, publicKey, signature) {
+        if (!this.settings.requireSignature) {
+            return { valid: true, cached: false };
+        }
+        
+        try {
+            // Check signature cache first
+            const cacheEntry = this.signatureCache.get(publicKey);
+            if (cacheEntry) {
+                const signatureHash = this.hashMessage(signature);
+                if (cacheEntry.validSignatures.has(signatureHash)) {
+                    return { valid: true, cached: true };
+                }
+                if (cacheEntry.invalidSignatures.has(signatureHash)) {
+                    return { valid: false, cached: true };
+                }
+            }
+            
+            // Verify signature using nucleus service
+            const isValid = await this.broker.call("nucleus.verifySignature", {
+                message,
+                signature,
+                publicKey
+            });
+            
+            // Cache the result
+            if (!this.signatureCache.has(publicKey)) {
+                this.signatureCache.set(publicKey, {
+                    validSignatures: new Set(),
+                    invalidSignatures: new Set()
+                });
+            }
+            
+            const signatureHash = this.hashMessage(signature);
+            const cache = this.signatureCache.get(publicKey);
+            
+            if (isValid) {
+                cache.validSignatures.add(signatureHash);
+            } else {
+                cache.invalidSignatures.add(signatureHash);
+            }
+            
+            // Limit cache size
+            if (cache.validSignatures.size > 100) {
+                const signatures = Array.from(cache.validSignatures);
+                cache.validSignatures.clear();
+                signatures.slice(-50).forEach(sig => cache.validSignatures.add(sig));
+            }
+            
+            if (cache.invalidSignatures.size > 50) {
+                const signatures = Array.from(cache.invalidSignatures);
+                cache.invalidSignatures.clear();
+                signatures.slice(-25).forEach(sig => cache.invalidSignatures.add(sig));
+            }
+            
+            return { valid: isValid, cached: false };
+            
+        } catch (err) {
+            this.logger.error("Signature verification failed:", err);
+            return { valid: false, cached: false, error: err.message };
+        }
+    }
+    
+    /**
+     * Log security events to journal
+     */
+    async logSecurityEvent(eventType, eventData) {
+        try {
+            const securityEvent = {
+                type: "security_event",
+                eventType,
+                eventData,
+                cellUUID: this.cellUUID,
+                timestamp: new Date().toISOString(),
+                eventId: this.generateSecurityEventId()
+            };
+            
+            // Sign the security event
+            const signature = await this.broker.call("nucleus.signMessage", {
+                message: JSON.stringify(securityEvent)
+            });
+            
+            securityEvent.signature = signature;
+            
+            // Write to journal
+            await this.broker.call("nucleus.write", {
+                name: "journal",
+                data: securityEvent
+            });
+            
+        } catch (err) {
+            this.logger.error("Failed to log security event:", err);
+        }
+    }
+    
+    /**
+     * Generate unique security event ID
+     */
+    generateSecurityEventId() {
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2, 8);
+        return `sec_${timestamp}_${randomId}`;
+    }
+    
+    /**
+     * Monitor suspicious activity patterns
+     */
+    trackSuspiciousActivity(peerUUID, activityType, details) {
+        if (!this.suspiciousActivity.has(peerUUID)) {
+            this.suspiciousActivity.set(peerUUID, {
+                events: [],
+                score: 0
+            });
+        }
+        
+        const activity = this.suspiciousActivity.get(peerUUID);
+        const now = Date.now();
+        
+        activity.events.push({
+            type: activityType,
+            details,
+            timestamp: now
+        });
+        
+        // Clean up old events (last 24 hours)
+        const dayAgo = now - (24 * 60 * 60 * 1000);
+        activity.events = activity.events.filter(event => event.timestamp > dayAgo);
+        
+        // Calculate suspicion score based on frequency and types
+        let suspicionScore = 0;
+        const eventCounts = {};
+        
+        activity.events.forEach(event => {
+            eventCounts[event.type] = (eventCounts[event.type] || 0) + 1;
+        });
+        
+        // High frequency of certain events increases suspicion
+        Object.entries(eventCounts).forEach(([type, count]) => {
+            switch (type) {
+                case 'failed_handshake':
+                    suspicionScore += count * 10;
+                    break;
+                case 'invalid_signature':
+                    suspicionScore += count * 15;
+                    break;
+                case 'rate_limit_exceeded':
+                    suspicionScore += count * 5;
+                    break;
+                case 'spam_detected':
+                    suspicionScore += count * 20;
+                    break;
+                default:
+                    suspicionScore += count * 2;
+            }
+        });
+        
+        activity.score = suspicionScore;
+        
+        // Take action if suspicion score is too high
+        if (suspicionScore > 100) {
+            this.blockPeer(peerUUID, `High suspicion score: ${suspicionScore}`);
+        } else if (suspicionScore > 50) {
+            // Reduce trust level
+            const peerInfo = this.discoveredPeers.get(peerUUID);
+            if (peerInfo && peerInfo.trustLevel === TRUST_LEVELS.TRUSTED) {
+                peerInfo.trustLevel = TRUST_LEVELS.UNKNOWN;
+                this.discoveredPeers.set(peerUUID, peerInfo);
+                this.trustedPeers.delete(peerUUID);
+                this.logger.warn(`Downgraded trust for ${peerUUID} due to suspicious activity`);
+            }
+        }
+        
+        this.logger.debug(`Suspicious activity tracked for ${peerUUID}: ${activityType} (score: ${suspicionScore})`);
+    }
+    
+    /**
+     * Cleanup security data structures periodically
+     */
+    cleanupSecurityData() {
+        const now = Date.now();
+        const cleanupThreshold = 24 * 60 * 60 * 1000; // 24 hours
+        
+        // Clean up rate limiters
+        for (const [peerUUID, rateLimiter] of this.rateLimiters.entries()) {
+            if (now - rateLimiter.lastReset > cleanupThreshold) {
+                this.rateLimiters.delete(peerUUID);
+            }
+        }
+        
+        // Clean up spam scores
+        for (const [peerUUID, spamData] of this.spamScores.entries()) {
+            if (now - spamData.lastUpdate > cleanupThreshold && spamData.score === 0) {
+                this.spamScores.delete(peerUUID);
+            }
+        }
+        
+        // Clean up suspicious activity
+        for (const [peerUUID, activity] of this.suspiciousActivity.entries()) {
+            activity.events = activity.events.filter(
+                event => now - event.timestamp < cleanupThreshold
+            );
+            
+            if (activity.events.length === 0) {
+                this.suspiciousActivity.delete(peerUUID);
+            }
+        }
+        
+        this.logger.debug("Security data cleanup completed");
     }
 } 
