@@ -163,6 +163,27 @@ export default class NucleusService extends BaseService {
                         method: "POST",
                         path: "/sign"
                     }
+                },
+                verifySignature: {
+                    params: {
+                        message: {
+                            type: "string",
+                            min: 1
+                        },
+                        signature: {
+                            type: "string",
+                            min: 1
+                        },
+                        publicKey: {
+                            type: "string",
+                            min: 100
+                        }
+                    },
+                    handler: this.verifySignatureAction,
+                    rest: {
+                        method: "POST",
+                        path: "/verify"
+                    }
                 }
             },
             created: this.onCreated,
@@ -524,6 +545,11 @@ export default class NucleusService extends BaseService {
         return this.signMessage(message);
     }
 
+    async verifySignatureAction(ctx) {
+        const { message, signature, publicKey } = ctx.params;
+        return this.verifySignature(message, signature, publicKey);
+    }
+
     // Helper methods
     async getCore(name, key = undefined, valueEncoding = 'json') {
         if (!this.store) {
@@ -560,20 +586,35 @@ export default class NucleusService extends BaseService {
 
     // Helper methods for encryption/signing
     async encryptForCell(targetPublicKey, message) {
+        // Hybrid encryption: AES-256-GCM for payload, RSA-OAEP for symmetric key
         if (!this.privateKey) {
             throw new Error('Cell key pair not yet generated');
         }
-        const encrypted = crypto.publicEncrypt(
-            {
-                key: targetPublicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256"
-            },
-            Buffer.from(message)
-        );
+
+        // 1. Generate random symmetric key and IV
+        const symmetricKey = crypto.randomBytes(32); // 256-bit key
+        const iv = crypto.randomBytes(12); // 96-bit nonce recommended for GCM
+
+        // 2. Encrypt the plaintext with AES-256-GCM
+        const cipher = crypto.createCipheriv('aes-256-gcm', symmetricKey, iv);
+        const ciphertext = Buffer.concat([cipher.update(message, 'utf8'), cipher.final()]);
+        const authTag = cipher.getAuthTag();
+
+        // 3. Encrypt the symmetric key with the target's RSA public key
+        const encryptedKey = crypto.publicEncrypt({
+            key: targetPublicKey,
+            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: 'sha256'
+        }, symmetricKey);
+
+        // 4. Sign the original plaintext so the receiver can verify integrity
         const signature = this.signMessage(message);
+
         return {
-            encrypted: encrypted.toString('base64'),
+            encrypted: ciphertext.toString('base64'),
+            encryptedKey: encryptedKey.toString('base64'),
+            iv: iv.toString('base64'),
+            authTag: authTag.toString('base64'),
             signature
         };
     }
@@ -582,20 +623,49 @@ export default class NucleusService extends BaseService {
         if (!this.privateKey) {
             throw new Error('Cell key pair not yet generated');
         }
-        const { encrypted, signature } = encryptedData;
-        const decrypted = crypto.privateDecrypt(
-            {
+
+        // Backwards compatibility: if no encryptedKey present, fall back to original RSA-only path
+        if (!encryptedData.encryptedKey) {
+            const { encrypted, signature } = encryptedData;
+            const plaintext = crypto.privateDecrypt({
                 key: this.privateKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256"
-            },
-            Buffer.from(encrypted, 'base64')
-        ).toString();
-        const isValid = this.verifySignature(decrypted, signature, sourcePublicKey);
+                oaepHash: 'sha256'
+            }, Buffer.from(encrypted, 'base64')).toString();
+
+            const isValid = this.verifySignature(plaintext, signature, sourcePublicKey);
+            if (!isValid) {
+                throw new Error('Invalid signature');
+            }
+            return plaintext;
+        }
+
+        // Hybrid path
+        const { encrypted, encryptedKey, iv, authTag, signature } = encryptedData;
+
+        // 1. Decrypt symmetric key
+        const symmetricKey = crypto.privateDecrypt({
+            key: this.privateKey,
+            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: 'sha256'
+        }, Buffer.from(encryptedKey, 'base64'));
+
+        // 2. Decrypt ciphertext
+        const decipher = crypto.createDecipheriv('aes-256-gcm', symmetricKey, Buffer.from(iv, 'base64'));
+        decipher.setAuthTag(Buffer.from(authTag, 'base64'));
+        const plaintextBuffer = Buffer.concat([
+            decipher.update(Buffer.from(encrypted, 'base64')),
+            decipher.final()
+        ]);
+        const plaintext = plaintextBuffer.toString('utf8');
+
+        // 3. Verify signature on plaintext
+        const isValid = this.verifySignature(plaintext, signature, sourcePublicKey);
         if (!isValid) {
             throw new Error('Invalid signature');
         }
-        return decrypted;
+
+        return plaintext;
     }
 
     signMessage(message) {
