@@ -1,6 +1,8 @@
 # Celluler MVP Roadmap
 
-## Phase 1: Core Infrastructure (Current)
+Phases 1–4 build **NADI** (L1: network, identity, messaging, commons engine), Phase 5 starts **PRANA** (L2: economy and governance), and **BUDDHI** (L3: AI commons) follows. See the [NADI Journal, Identity & Messaging spec](nadi-journal-identity.md) for the design behind Phase 1.5.
+
+## Phase 1: Core Infrastructure (Done, Jun 2025)
 
 ### 1. Core Services
 - [x] NucleusService
@@ -41,6 +43,7 @@
 - [x] Add basic authentication
 - [x] Add API documentation
 - [x] Add rate limiting
+- [ ] Register ApiService in the cell's service map (currently not started by the CLI)
 
 ### 5. Documentation
 - [x] Add service development guidelines
@@ -49,14 +52,50 @@
 - [ ] Add configuration guide
 - [ ] Add deployment guides for different environments
 
-## Phase 2: Network Foundation
+## Phase 1.5: NADI Foundation — Journal, Identity & Messaging (Next)
+
+Prerequisite for any other service registering journal records or message protocols.
+
+### 1. Keys and identity root
+- [ ] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
+- [ ] Cell ID = public journal key; replace generated UUID with `nucleus/genesis`
+- [ ] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
+- [ ] `nucleus/key.add` / `nucleus/key.revoke` attestations
+
+### 2. Nucleus as memory manager
+- [ ] Deterministic record envelope (decide compact-encoding vs canonical JSON)
+- [ ] Record-type registration with retention classes (`permanent`, `window`, `ephemeral`)
+- [ ] Encrypted private store (Hyperbee) and type index
+- [ ] Salted leaf commitments and Merkle epochs (`nucleus/epoch`, `nucleus/commit`)
+- [ ] `record`, `query` and `prove` actions; proof verification
+- [ ] Replace raw `write` with `record`; fix double-encoded JSON
+
+### 3. Base MessageService
+- [ ] Depend only on the Nucleus (drop identity/consensus dependencies and the fixed message-type enum)
+- [ ] Generic signed envelope; protocol handler registration
+- [ ] Unicast over Hyperswarm with swarm-key attestation check
+- [ ] Topic multicast/broadcast with dedupe and TTL
+- [ ] Optional sealed bodies for relayed messages
+- [ ] Receipts recorded through the Nucleus (`none` / `hash` / `full` per protocol)
+
+### 4. Edges and proofs
+- [ ] Private per-epoch edge attestations (`identity/edge`)
+- [ ] Co-signed public edge reveals (`nucleus/edge.reveal`)
+- [ ] T1 possession and T4 selective-claim proofs
+
+### 5. Multi-cell testing
+- [ ] In-process DHT (`hyperdht/testnet`) for all tests
+- [ ] Two-cell and N-cell (3, 10, 50) scenarios
+- [ ] Fault cases: revoked key, tampered record, unattested swarm key
+- [ ] Benchmark private-store layouts (single, per-service, per-day)
+
+## Phase 2: Network Foundation (NADI)
 
 ### 1. Core Services (Continued)
-- [ ] MessageService
-  - [ ] Basic message routing and delivery
-  - [ ] Hypercore-based message journal
-  - [ ] Message verification
-  - [ ] Unit tests
+- [ ] AuthService
+  - [ ] Registers the `auth/1` message protocol with the MessageService
+  - [ ] Challenge–response (T1) and proof exchange (T4)
+  - [ ] Unit and multi-cell tests
 
 - [ ] IdentityService
   - [ ] Cell identity verification
@@ -65,14 +104,9 @@
   - [ ] Unit tests
 
 ### 2. Cell-to-Cell Communication
-- [ ] Evaluate communication options:
-  - [ ] Socket.io
-  - [ ] WebSockets
-  - [ ] Hyperswarm peer connections (partially implemented)
-- [ ] Implement chosen protocol
-- [ ] Add secure connections
-- [ ] Implement message routing
-- [ ] Add connection management
+- [x] Choose transport: Hyperswarm (Noise-encrypted) with Protomux framing (decided in the NADI spec)
+- [ ] Relay / store-and-forward for offline cells
+- [ ] Connection management and peer health
 
 ### 3. Basic Security
 - [x] Basic Hypercore encryption
@@ -100,7 +134,7 @@
 - [ ] Add network metrics
 - [ ] Add log aggregation
 
-## Phase 3: State and Consensus
+## Phase 3: State and Consensus (NADI commons engine)
 
 ### 1. Core Services (Continued)
 - [ ] StateService
@@ -172,7 +206,7 @@
 - [ ] Add resource optimization
 - [ ] Add performance tuning
 
-## Phase 5: Market Features
+## Phase 5: Market Features (PRANA)
 
 ### 1. Basic Market
 - [ ] Implement PRANA token
@@ -194,6 +228,12 @@
   - [ ] Market status
 - [ ] Add advanced market features
 - [ ] Add market monitoring
+
+## Phase 6: AI Commons (BUDDHI)
+
+- [ ] Compute commons: resource offers and scheduling as registered protocols
+- [ ] Data commons: dataset hosting and access
+- [ ] Model and agent commons: shared model hosting, training feedback
 
 ## Future Considerations
 

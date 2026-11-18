@@ -2,7 +2,17 @@
 
 ## System Design
 
-Celluler is designed as a distributed system where each node (cell) is both a self-contained unit and part of a larger network. The architecture is built on several key technologies and principles:
+Celluler is designed as a distributed system where each node (cell) is both a self-contained unit and part of a larger network. The architecture is built on several key technologies and principles.
+
+### Protocol Layers
+
+| Layer | Name | Scope |
+|---|---|---|
+| L1 | **NADI** — Network of Agents with Decentralized Identity | Cells, signed journals, decentralized identity and trust, messaging, commons engine (Hashgraph consensus) |
+| L2 | **PRANA** — Public Resource Alliance Network Architecture | Economy and governance: PRANA token, quadratic funding and voting, co-op and private commons |
+| L3 | **BUDDHI** — Builder-owned, Universally Distributed, Democratically Hosted Intelligence | AI commons: compute, data, model and agent commons |
+
+A service may depend only on services in its own layer or below. Within NADI, the NucleusService depends on nothing and the MessageService depends only on the Nucleus; every other service plugs in by registering record types with the Nucleus and message protocols with the MessageService. The NADI foundation is specified in detail in [NADI Journal, Identity & Messaging](nadi-journal-identity.md).
 
 ### Core Technologies
 
@@ -16,8 +26,8 @@ Celluler is designed as a distributed system where each node (cell) is both a se
    - Distributed append-only logs for message journals
    - Cryptographic message history and verification
    - Peer-to-peer data sharing
-   - Data encryption and access control
-   - Identity verification through social interaction history
+   - Each cell's public journal holds only commitments (hashes and Merkle roots); private data lives in an encrypted, non-replicated store
+   - Identity verification through committed social interaction history
 
 3. **Consensus Algorithm (Hashgraph)**
    - Byzantine fault tolerance
@@ -27,27 +37,25 @@ Celluler is designed as a distributed system where each node (cell) is both a se
 
 ## Cell Architecture
 
-A cell is implemented as a cluster of microservices, each maintaining its own Hypercore journal and participating in the Hashgraph consensus network. The services work together to provide the cell's functionality while maintaining data integrity and security.
+A cell is implemented as a cluster of microservices. The NucleusService acts as the cell's memory manager: it owns the cell's keys, its public journal and its private store, and services record data through it rather than writing cores directly. The services work together to provide the cell's functionality while maintaining data integrity and security.
 
 ![Cell Architecture Diagram](images/architecture-diagram.png)
 
 
 ### Core Services
 
-1. **NucleusService**
-   - Central configuration and coordination point for the cell
-   - Manages the cell's Hypercore journal
-   - Handles service registration and discovery
-   - Maintains cell metadata and configuration
-   - Coordinates service lifecycle and dependencies
-   - Provides centralized access control for Hypercore modifications
+1. **NucleusService** (NADI)
+   - The cell's memory manager; depends on no other service
+   - Holds the root seed and derives all cell keys; the journal's public key is the cell ID
+   - Defines the generic record envelope; services register their own record types and retention classes
+   - Keeps full records in an encrypted private store and commits their hashes to the public journal in Merkle epochs
+   - Produces proofs about any retained committed record
 
-2. **MessageService**
-   - Handles message routing and delivery
-   - Implements message protocol
-   - Manages Hypercore-based message journals
-   - Provides message verification and identity proofs
-   - Maintains a Hypercore journal of all incoming/outgoing messages
+2. **MessageService** (NADI)
+   - Depends only on the NucleusService
+   - Defines the generic message envelope and delivery (unicast, multicast, broadcast) between cells
+   - Defines no message types: services register handlers for their own protocols (e.g. an AuthService registers `auth/1`)
+   - Records message receipts through the Nucleus, at a journal mode each protocol chooses
 
 3. **StateService**
    - Maintains local state
@@ -81,64 +89,46 @@ Services within a cell coordinate through:
 
 ### Data Storage
 
-Each service maintains its own Hypercore journal:
-- NucleusService manages write access to all Hypercore journals
-- Services have direct read access to their respective journals
-- Append-only log of all state changes
-- Cryptographic verification of data integrity
-- Efficient peer-to-peer synchronization
-- Access control and encryption
-- Version history and rollback capabilities
+Each cell has two kinds of storage, both managed by the NucleusService:
+- **Public journal**: one replicated Hypercore holding only Nucleus records — genesis, key attestations, epoch Merkle roots, immediate commitments and co-signed edge reveals. Anything in it is permanent and public.
+- **Private store**: an encrypted, never-replicated Hyperbee holding full records, message bodies and Merkle leaves. It can be segmented and pruned; pruning a record makes its commitment unprovable, so each record type declares a retention class (`permanent`, `window`, `ephemeral`).
+
+Whether the private store is split per service or per time period is an implementation choice to be benchmarked; only epoch roots are public.
 
 ## Messaging Protocol
+
+The MessageService defines syntax only; services define the semantics of their own protocols. Full detail: [NADI spec §9](nadi-journal-identity.md#9-message-service).
 
 ### Message Structure
 
 ```typescript
 interface Message {
-    timestamp: number;
-    sender: string;    // Cell ID
-    receiver: string;  // Cell ID
-    type: MessageType;
-    body: any;
-    signature: string; // Cryptographic signature
-    proof: string;     // Identity proof
-}
-
-enum MessageType {
-    CHAT = 'CHAT',     // Human-readable communication
-    AUTH = 'AUTH',     // Authentication and identity verification
-    TX = 'TX',         // Transactional data
-    POST = 'POST',     // Content shared to global dataset
-    QUERY = 'QUERY',   // Requests for data from global dataset
-    EXEC = 'EXEC'      // Execution requests
+    v: 1;
+    id: Bytes32;          // H(from ‖ seq ‖ ts), used for dedupe
+    from: Bytes32;        // sender cell ID (journal public key)
+    to: Bytes32 | Topic;  // a cell, or a topic for multicast/broadcast
+    protocol: string;     // "<service>/<version>", e.g. "auth/1", registered by that service
+    ts: number;
+    ttl?: number;         // hop limit for multicast / relay
+    body: Uint8Array;     // opaque; optionally sealed to the recipient's X25519 key
+    sig: Bytes64;         // sender's attested Ed25519 signing key over all fields
 }
 ```
 
+There is no fixed `MessageType` enum. Former types such as AUTH, TX or QUERY become protocols owned by the services that handle them (AuthService, a PRANA ledger service, a BUDDHI data service, and so on).
+
 ### Message Flow
 
-1. **Message Creation**
-   - Service creates message with appropriate type and body
-   - IdentityService signs message with cell's private key
-   - MessageService adds timestamp and routing information
-
-2. **Message Routing**
-   - MessageService determines target cell(s)
-   - Uses P2P network to deliver message
-   - Maintains delivery status in Hypercore journal
-
-3. **Message Processing**
-   - Receiver validates message signature and proof
-   - Appropriate service processes message based on type
-   - State changes recorded in respective Hypercore journals
-   - Consensus events propagated through Hashgraph network
+1. **Sending**: a service calls `message.send` (unicast) or `message.publish` (topic) with its protocol name and an opaque body; the MessageService signs and, if requested, seals the body.
+2. **Delivery**: unicast over a Hyperswarm connection to the recipient's attested swarm key; multicast by topic with dedupe on `id` and TTL. Delivery is at-most-once and unordered in v1.
+3. **Receiving**: the MessageService verifies the signature, records a receipt through the Nucleus, and dispatches to the handler registered for `protocol`. Unknown protocols are dropped.
 
 ## Network Architecture
 
 ### Cell-to-Cell Communication
 
 1. **Direct P2P Connections**
-   - Secure WebSocket connections between cells
+   - Hyperswarm connections (Noise-encrypted; the remote swarm key must be attested in the sender's journal)
    - Message routing and delivery
    - Connection management and health monitoring
 
@@ -157,8 +147,8 @@ enum MessageType {
 ### Security Model
 
 1. **Identity Verification**
-   - Cryptographic signatures
-   - Social proof verification
+   - Tiered verification: key possession (T1), continuity via cross-cell anchors (T2), social proof from relationship edges (T3), selective claims with Merkle proofs (T4)
+   - Hybrid edge privacy: relationships are committed privately by default; a cell may reveal an edge, or a protocol may require one, and public reveals are co-signed by both cells
    - Trust network validation
    - Reputation-based access control
 
@@ -218,7 +208,7 @@ enum MessageType {
    - Access control events
    - Security incidents
 
-## Market Architecture
+## Market Architecture (PRANA, L2)
 
 ### Market Types
 

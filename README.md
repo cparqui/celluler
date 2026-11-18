@@ -1,14 +1,14 @@
 # Celluler
 
-A decentralized AI agent ecosystem built on peer-to-peer protocols, where nodes (called "cells") collaborate to run AI models, host datasets, and provide training feedback in a distributed manner.
+A decentralized peer-to-peer protocol for defining cooperative economic mechanisms, governing common resources, and creating publicly owned and operated AI systems. Participants (people or AI agents) run nodes called "cells".
 
 ## Overview
 
 Celluler is a distributed system that combines:
-- DAT Protocol for distributed data storage and versioning
-- Hashgraph consensus algorithm for maintaining global state
+- Hypercore Protocol (Holepunch / Pear stack: Hypercore, Corestore, Hyperswarm) for signed append-only journals and P2P replication
+- Hashgraph consensus algorithm for maintaining shared commons state
 - Moleculer microservices framework for internal cell architecture
-- P2P networking for cell-to-cell communication
+- Ed25519 / X25519 cryptography for decentralized identity and private messaging
 
 Each cell in the network is a self-contained unit that can:
 - Run AI model inference
@@ -19,12 +19,15 @@ Each cell in the network is a self-contained unit that can:
 
 ## Architecture
 
-The system is built in layers:
+Each cell runs a Moleculer microservices cluster. The protocol is built in three layers:
 
-1. **Cell Layer**: Individual nodes in the network, each running a Moleculer microservices cluster
-2. **P2P Layer**: DAT protocol for data distribution and Hashgraph for consensus
-3. **Service Layer**: Internal cell services for specific functionalities
-4. **AI Layer**: Model execution and training capabilities
+| Layer | Name | What it is |
+|---|---|---|
+| L1 | **NADI** — Network of Agents with Decentralized Identity | P2P network: cells, signed Hypercore journals, decentralized identity and trust, messaging, commons engine (Hashgraph consensus) |
+| L2 | **PRANA** — Public Resource Alliance Network Architecture | Economy and governance: PRANA token, quadratic funding and voting, co-op and private commons |
+| L3 | **BUDDHI** — Builder-owned, Universally Distributed, Democratically Hosted Intelligence | AI commons: compute, data, model and agent commons |
+
+The NADI foundation (journal, identity, messaging) is specified in [docs/nadi-journal-identity.md](docs/nadi-journal-identity.md).
 
 ## Getting Started
 
@@ -38,7 +41,7 @@ The system is built in layers:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/celluler.git
+git clone https://github.com/cparqui/celluler.git
 cd celluler
 
 # Install dependencies
@@ -50,19 +53,14 @@ npm run start
 
 ### Configuration
 
-Create a `config/default.json` file with your cell configuration:
+Cells are configured with YAML files in `config/` (validated against `schemas/celluler_config.schema.json`). Files can inherit with `extends` and reference environment variables as `${VAR}`:
 
-```json
-{
-  "namespace": "cell",
-  "nodeID": "your-cell-id",
-  "services": [
-    "services/*.service.js"
-  ],
-  "transporter": "TCP",
-  "logLevel": "info"
-}
+```bash
+# Start with the local development profile
+npm run start:dev    # = node src/cli.js start -c config/local.config.yaml
 ```
+
+Under the NADI spec, a cell's identity is derived from its persisted root seed, so use `file` storage for any cell that should keep the same identity across restarts; `memory` storage is for tests. See [docs/configuration.md](docs/configuration.md).
 
 ## Documentation
 
