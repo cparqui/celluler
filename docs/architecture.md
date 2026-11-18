@@ -71,7 +71,10 @@ A cell is implemented as a cluster of microservices. The NucleusService acts as 
    - Implements reputation systems
    - Stores identity and trust data in a Hypercore journal
 
-5. **ConsensusService**
+5. **ConsensusService** (NADI commons engine; see [proposal](nadi-consensus.md))
+   - Runs Hashgraph consensus per commons (co-op, market, data commons), not globally
+   - Each member's event chain is a Hypercore; checkpoints signed by > 2/3 of the weight
+   - Participation stats in checkpoints become identity evidence (commons attestations)
    - Participates in Hashgraph consensus
    - Propagates events to other cells
    - Validates received events

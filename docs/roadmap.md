@@ -83,7 +83,13 @@ Prerequisite for any other service registering journal records or message protoc
 - [ ] Co-signed public edge reveals (`nucleus/edge.reveal`)
 - [ ] T1 possession and T4 selective-claim proofs
 
-### 5. Multi-cell testing
+### 5. Private store backup
+- [ ] Daily segments with per-segment keys; crypto-shredding on prune
+- [ ] Reed-Solomon striping (4-of-7 default) to custodian shard cores
+- [ ] Custodian storage checks and repair
+- [ ] Shamir seed recovery via guardians (`backup/1` protocol)
+
+### 6. Multi-cell testing
 - [ ] In-process DHT (`hyperdht/testnet`) for all tests
 - [ ] Two-cell and N-cell (3, 10, 50) scenarios
 - [ ] Fault cases: revoked key, tampered record, unattested swarm key
@@ -136,6 +142,8 @@ Prerequisite for any other service registering journal records or message protoc
 
 ## Phase 3: State and Consensus (NADI commons engine)
 
+Design: [NADI Commons Engine — Consensus & Identity](nadi-consensus.md) (proposal). Consensus is per commons, with event chains as Hypercores and participation feeding identity (T3b).
+
 ### 1. Core Services (Continued)
 - [ ] StateService
   - [ ] Local state management
@@ -144,12 +152,13 @@ Prerequisite for any other service registering journal records or message protoc
   - [ ] Hypercore journal
   - [ ] Unit tests
 
-- [ ] ConsensusService
-  - [ ] Hashgraph consensus algorithm
-  - [ ] Event propagation
-  - [ ] Event validation
-  - [ ] Consensus state management
-  - [ ] Unit tests
+- [ ] ConsensusService (Hashgraph, per commons)
+  - [ ] C1: event cores and DAG sync; bandwidth measurement
+  - [ ] C2: virtual voting — rounds, witnesses, fame, consensus order and timestamps
+  - [ ] C3: checkpoints, admission transactions, fork proofs
+  - [ ] C4: participation stats, T3b commons attestations, epoch-root anchoring
+  - [ ] C5: private commons (eras), federation
+  - [ ] Unit and multi-cell tests
 
 ### 2. Integration Testing
 - [ ] Add multi-cell test scenarios

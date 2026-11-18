@@ -7,6 +7,7 @@ Welcome to the Celluler documentation! This is your starting point for understan
 <!-- - [Getting Started](getting-started.md) -->
 - [Architecture Overview](architecture.md)
 - [NADI Journal, Identity & Messaging spec](nadi-journal-identity.md)
+- [NADI Commons Engine: Consensus & Identity (proposal)](nadi-consensus.md)
 - [Service Development](services.md)
 - [Development Roadmap](roadmap.md)
 
