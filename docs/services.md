@@ -125,240 +125,70 @@ export default class ExampleService extends BaseService {
 
 ## Core Service Types
 
+The NADI base services define **syntax**; other services define **semantics** by registering with them. The NucleusService depends on nothing, the MessageService depends only on the Nucleus, and every other service registers record types with the Nucleus and message protocols with the MessageService. The authoritative design is the [NADI Journal, Identity & Messaging spec](nadi-journal-identity.md); the sketches below summarize its interfaces.
+
 ### 1. NucleusService
 
-Manages cell configuration and coordinates service interactions:
+The cell's memory manager: owns the root seed and derived keys, the journal (the cell's event chain), the encrypted private store, backups and proofs.
 
 ```javascript
-// src/services/nucleus.service.js
+// Interface sketch (see spec §6.1)
 
-import { Service } from "moleculer";
-import _ from "lodash";
+// Called once by each service at startup
+await ctx.call("nucleus.registerRecordType", {
+    type: "msg/received",            // "<service>/<record>"
+    owner: "message",
+});
 
-const JournalUpdateParams = {
-    service: "string",
-    operation: {
-        type: "enum",
-        values: ["append", "truncate", "sync"]
-    },
-    data: "any",
-    proof: "string"
-};
+// Public transaction types appear in the journal as `tx` events
+await ctx.call("nucleus.registerTxType", { type: "prana/vote", owner: "prana-governance" });
 
-const ServiceRegisterParams = {
-    service: {
-        type: "object",
-        props: {
-            name: "string",
-            version: "string",
-            dependencies: "array"
-        }
-    }
-};
+// Record: stores the full record privately, commits its salted hash
+const { seq, leaf } = await ctx.call("nucleus.record", {
+    type: "msg/received",
+    body,                            // encoded by the owning service
+    refs: []                         // optional links to other cells' commitments
+});
 
-const DEFAULT_SETTINGS = {
-    // Storage settings
-    journalPath: "./data/nucleus",  // Path for nucleus journal
-    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
-    
-    // Network settings
-    timeout: 5000,  // Default timeout in milliseconds
-    retryCount: 3,  // Number of retry attempts
-    
-    // Security settings
-    requireAuth: true,  // Require authentication
-    requireProof: true,  // Require operation proofs
-    
-    // Performance settings
-    batchSize: 100,  // Size of processing batches
-    cacheSize: 1000, // Size of in-memory cache
-    
-    // Cell configuration
-    cellId: null,    // Unique identifier for the cell
-    cellName: null,  // Human-readable cell name
-    cellVersion: "1.0.0",  // Cell version
-    cellConfig: {    // Cell-specific configuration
-        features: [],
-        capabilities: [],
-        limits: {}
-    }
-};
+// Query the private store by type
+await ctx.call("nucleus.query", { type: "msg/received", limit: 100 });
 
-export default class NucleusService extends Service {
-    constructor(broker, settings = {}) {
-        super(broker, {
-            name: "nucleus",
-            version: 1,
-            settings: {
-                ...DEFAULT_SETTINGS,
-                ...settings
-            },
-            dependencies: [],
-            actions: {
-                updateJournal: {
-                    params: JournalUpdateParams,
-                    handler: this.updateJournal
-                },
-                registerService: {
-                    params: ServiceRegisterParams,
-                    handler: this.registerService
-                },
-                getCellConfig: {
-                    handler: this.getCellConfig
-                }
-            },
-            events: {
-                "service.registered": this.onServiceRegistered,
-                "journal.updated": this.onJournalUpdated
-            }
-        });
-    }
+// Produce a proof about a retained record (leaf-only or full disclosure)
+await ctx.call("nucleus.prove", { seq, disclose: "full" });
 
-    async updateJournal(ctx) {
-        const { service, operation, data, proof } = ctx.params;
-        // Validate operation proof
-        // Update Hypercore journal
-        // Notify affected services
-        return { success: true };
-    }
+// Redaction is an explicit, recorded exception; owners never delete
+await ctx.call("nucleus.redact", { seq, reason });
 
-    async registerService(ctx) {
-        const { service } = ctx.params;
-        // Register new service
-        // Update service registry
-        // Initialize service dependencies
-        return { success: true };
-    }
+// Identity
+await ctx.call("nucleus.getCellId");      // public journal key, hex
+```
 
-    async getCellConfig(ctx) {
-        // Return cell configuration
-        return {
-            cellId: this.settings.cellId,
-            cellName: this.settings.cellName,
-            cellVersion: this.settings.cellVersion,
-            cellConfig: this.settings.cellConfig
-        };
-    }
-
-    async onServiceRegistered(ctx) {
-        // Handle service registration events
-    }
-
-    async onJournalUpdated(ctx) {
-        // Handle journal update events
-    }
-}
+Services never write cores directly; the journal is append-only, so there is no truncate operation.
 
 ### 2. MessageService
 
-Handles message routing, delivery, and verification:
+Moves messages reliably between cells over pairwise links and topics. It defines no message types and depends only on the Nucleus.
 
 ```javascript
-// src/services/message.service.js
+// Interface sketch (see spec §9)
 
-import { Service } from "moleculer";
-import _ from "lodash";
+// A service registers the protocol it owns, e.g. in AuthService.started()
+await ctx.call("message.register", { protocol: "auth/1", handler: "auth.onMessage" });
 
-const MessageSendParams = {
-    message: {
-        type: "object",
-        props: {
-            timestamp: "number",
-            sender: "string",
-            receiver: "string",
-            type: "string",
-            body: "any",
-            signature: "string",
-            proof: "string"
-        }
-    }
-};
+// Handshake: both cells agree to communicate and exchange link core keys
+await ctx.call("message.link", { to: cellId });
 
-const MessageReceiveParams = {
-    message: "object"
-};
+// Send: appended to this cell's link core for the recipient
+const { id, index } = await ctx.call("message.send", { to: cellId, protocol: "auth/1", body });
 
-const DEFAULT_SETTINGS = {
-    // Storage settings
-    journalPath: "./data/message",  // Path for message journal
-    maxJournalSize: 1024 * 1024 * 1000,  // Maximum journal size in bytes
-    
-    // Network settings
-    timeout: 10000,  // Message timeout in milliseconds
-    retryCount: 5,   // Number of delivery retries
-    
-    // Security settings
-    requireSignature: true,  // Require message signatures
-    requireProof: true,      // Require identity proofs
-    
-    // Performance settings
-    batchSize: 50,   // Message batch size
-    cacheSize: 1000, // Message cache size
-    
-    // Nested settings
-    storage: {
-        type: "hypercore",
-        options: {
-            maxSize: 1024 * 1024 * 1000,
-            compression: true
-        }
-    },
-    network: {
-        protocol: "tcp",
-        options: {
-            keepAlive: true,
-            timeout: 10000
-        }
-    }
-};
+// Multicast: appended to this cell's topic core
+await ctx.call("message.publish", { topic: "coop/la-paz", protocol: "prana-vote/1", body });
 
-export default class MessageService extends Service {
-    constructor(broker, settings = {}) {
-        super(broker, {
-            name: "message",
-            version: 1,
-            settings: _.defaultsDeep(settings, DEFAULT_SETTINGS),
-            dependencies: [
-                "identity",
-                "consensus"
-            ],
-            actions: {
-                send: {
-                    params: MessageSendParams,
-                    handler: this.sendMessage
-                },
-                receive: {
-                    params: MessageReceiveParams,
-                    handler: this.receiveMessage
-                }
-            },
-            events: {
-                "message.received": this.onMessageReceived
-            }
-        });
-    }
-
-    async sendMessage(ctx) {
-        const { message } = ctx.params;
-        // Validate message signature and proof
-        // Route message to target cell
-        // Store in Hypercore journal
-        return { success: true };
-    }
-
-    async receiveMessage(ctx) {
-        const { message } = ctx.params;
-        // Process incoming message
-        // Update message journal
-        // Trigger appropriate events
-        return { success: true };
-    }
-
-    async onMessageReceived(ctx) {
-        // Handle message reception events
-    }
-}
+// Delivery state from the recipient's receipts
+await ctx.call("message.status", { id });   // "sent" | "delivered" | "processed"
 ```
+
+On receipt the MessageService verifies the sender's signature, copies the body into the private store, appends an inbox entry, acknowledges in its own link core, and dispatches inbox messages in arrival order to the registered handler. Unknown protocols are recorded but not dispatched. Inbox delivery is exactly-once; handlers must be idempotent by message `id`.
 
 ### 3. StateService
 
@@ -450,7 +280,8 @@ export default class StateService extends Service {
 
 ### 4. IdentityService
 
-Manages cell identity and trust networks:
+Manages cell identity and trust networks. Under the NADI spec it records private relationship edges from real traffic (`identity/edge`) through the Nucleus, handles co-signed public edge reveals, and verifies T2/T3 identity claims (spec §7–§8). The sketch below predates the spec and will be revised.
+
 
 ```javascript
 // src/services/identity.service.js

@@ -6,6 +6,8 @@ Welcome to the Celluler documentation! This is your starting point for understan
 
 <!-- - [Getting Started](getting-started.md) -->
 - [Architecture Overview](architecture.md)
+- [NADI Journal, Identity & Messaging spec](nadi-journal-identity.md)
+- [NADI Consensus: Hierarchical Hashgraph (proposal)](nadi-consensus.md)
 - [Service Development](services.md)
 - [Development Roadmap](roadmap.md)
 
@@ -17,7 +19,13 @@ Welcome to the Celluler documentation! This is your starting point for understan
 
 ## What is Celluler?
 
-Celluler is a decentralized microservices platform built on peer-to-peer protocols, where each service (called a "cell") is both a self-contained unit and part of a larger network. Cells communicate through a secure messaging protocol and maintain their state through distributed append-only logs (Hypercore) and consensus (Hashgraph).
+Celluler is a decentralized peer-to-peer protocol for defining cooperative economic mechanisms, governing common resources, and creating publicly owned and operated AI systems. Each participant (a person or AI agent) runs a node called a "cell" that is both a self-contained unit and part of a larger network. Cells communicate through a secure messaging protocol and maintain their state through signed append-only journals (Hypercore) and consensus (Hashgraph).
+
+The protocol has three layers:
+
+- **NADI** (L1) — Network of Agents with Decentralized Identity: cells, journals, identity, messaging and the commons engine
+- **PRANA** (L2) — Public Resource Alliance Network Architecture: economy and governance
+- **BUDDHI** (L3) — Builder-owned, Universally Distributed, Democratically Hosted Intelligence: the AI commons
 
 ## Core Features
 

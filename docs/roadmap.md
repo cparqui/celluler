@@ -1,6 +1,8 @@
 # Celluler MVP Roadmap
 
-## Phase 1: Core Infrastructure (Current)
+Phases 1–4 build **NADI** (L1: network, identity, messaging, commons engine), Phase 5 starts **PRANA** (L2: economy and governance), and **BUDDHI** (L3: AI commons) follows. See the [NADI Journal, Identity & Messaging spec](nadi-journal-identity.md) for the design behind Phase 1.5.
+
+## Phase 1: Core Infrastructure (Done, Jun 2025)
 
 ### 1. Core Services
 - [x] NucleusService
@@ -41,6 +43,7 @@
 - [x] Add basic authentication
 - [x] Add API documentation
 - [x] Add rate limiting
+- [ ] Register ApiService in the cell's service map (currently not started by the CLI)
 
 ### 5. Documentation
 - [x] Add service development guidelines
@@ -49,14 +52,58 @@
 - [ ] Add configuration guide
 - [ ] Add deployment guides for different environments
 
-## Phase 2: Network Foundation
+## Phase 1.5: NADI Foundation — Journal, Identity & Messaging (Next)
+
+Prerequisite for any other service registering journal records or message protocols.
+
+### 1. Keys and identity root
+- [ ] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
+- [ ] Cell ID = journal public key; replace generated UUID with a `genesis` event
+- [ ] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
+- [ ] `key.add` / `key.revoke` events
+
+### 2. Nucleus as memory manager
+- [ ] Journal as event chain: deterministic event format and kinds (decide compact-encoding vs canonical JSON)
+- [ ] Record and transaction type registration
+- [ ] Encrypted, mutable private store and type index
+- [ ] Salted leaf commitments; commitment root in each event
+- [ ] `record`, `emit`, `query`, `prove` and `redact` actions; proof verification
+- [ ] Replace raw `write`; fix double-encoded JSON
+
+### 3. Reliable MessageService
+- [ ] Depend only on the Nucleus (drop identity/consensus dependencies and the fixed message-type enum)
+- [ ] Link handshake, shared link secret, sender-owned link cores
+- [ ] Inbox, delivered/processed receipts, startup catch-up
+- [ ] Blind replicas for offline senders
+- [ ] First contact (introductions, rate-limited request topic)
+- [ ] Topic cores for multicast; link closure
+- [ ] Protocol handler registration
+
+### 4. Edges and proofs
+- [ ] Private edge records from real traffic (`identity/edge`)
+- [ ] Revealed `message` events and co-signed `edge.reveal` events
+- [ ] T1 possession and T4 selective-claim proofs
+
+### 5. Private store backup
+- [ ] Hourly append-only backup chunks; per-record content keys (for redaction)
+- [ ] Reed-Solomon striping (4-of-7 default) to custodian shard cores
+- [ ] Custodian storage checks and repair
+- [ ] Shamir seed recovery via guardians (`backup/1` protocol)
+
+### 6. Multi-cell testing
+- [ ] In-process DHT (`hyperdht/testnet`) for all tests
+- [ ] Two-cell and N-cell (3, 10, 50) scenarios
+- [ ] Offline delivery: receiver offline, sender offline (blind replica)
+- [ ] Fault cases: revoked key, tampered record, unattested swarm key, cloned journal key
+- [ ] Benchmark private-store layouts (single, per-service, per-day)
+
+## Phase 2: Network Foundation (NADI)
 
 ### 1. Core Services (Continued)
-- [ ] MessageService
-  - [ ] Basic message routing and delivery
-  - [ ] Hypercore-based message journal
-  - [ ] Message verification
-  - [ ] Unit tests
+- [ ] AuthService
+  - [ ] Registers the `auth/1` message protocol with the MessageService
+  - [ ] Challenge–response (T1) and proof exchange (T4)
+  - [ ] Unit and multi-cell tests
 
 - [ ] IdentityService
   - [ ] Cell identity verification
@@ -65,14 +112,9 @@
   - [ ] Unit tests
 
 ### 2. Cell-to-Cell Communication
-- [ ] Evaluate communication options:
-  - [ ] Socket.io
-  - [ ] WebSockets
-  - [ ] Hyperswarm peer connections (partially implemented)
-- [ ] Implement chosen protocol
-- [ ] Add secure connections
-- [ ] Implement message routing
-- [ ] Add connection management
+- [x] Choose transport: Hyperswarm (Noise-encrypted) with Protomux framing (decided in the NADI spec)
+- [ ] Relay / store-and-forward for offline cells
+- [ ] Connection management and peer health
 
 ### 3. Basic Security
 - [x] Basic Hypercore encryption
@@ -100,7 +142,9 @@
 - [ ] Add network metrics
 - [ ] Add log aggregation
 
-## Phase 3: State and Consensus
+## Phase 3: State and Consensus (NADI commons engine)
+
+Design: [NADI Consensus — Hierarchical Hashgraph over Cell Journals](nadi-consensus.md) (proposal). Hashgraph runs over cells' journals in protocol-assigned clusters of *N* (starting at 100), nested through representatives; parameters are tuned by testing.
 
 ### 1. Core Services (Continued)
 - [ ] StateService
@@ -110,12 +154,14 @@
   - [ ] Hypercore journal
   - [ ] Unit tests
 
-- [ ] ConsensusService
-  - [ ] Hashgraph consensus algorithm
-  - [ ] Event propagation
-  - [ ] Event validation
-  - [ ] Consensus state management
-  - [ ] Unit tests
+- [ ] ConsensusService (hierarchical Hashgraph)
+  - [ ] C1: journals as events, two-way ping syncs with verifiable partners; bandwidth and journal growth
+  - [ ] C2: virtual voting — local order and timestamps; sweep N and sync rate for finality latency
+  - [ ] C3: checkpoints, active roster and liveness, fork proofs
+  - [ ] C4: two-level hierarchy — representatives, cross-links, causally adjusted global order, watermarks
+  - [ ] C5: participation stats and T3b attestations
+  - [ ] C6: split/merge, reshuffling, three levels in simulation
+  - [ ] Unit and multi-cell tests
 
 ### 2. Integration Testing
 - [ ] Add multi-cell test scenarios
@@ -172,7 +218,7 @@
 - [ ] Add resource optimization
 - [ ] Add performance tuning
 
-## Phase 5: Market Features
+## Phase 5: Market Features (PRANA)
 
 ### 1. Basic Market
 - [ ] Implement PRANA token
@@ -194,6 +240,12 @@
   - [ ] Market status
 - [ ] Add advanced market features
 - [ ] Add market monitoring
+
+## Phase 6: AI Commons (BUDDHI)
+
+- [ ] Compute commons: resource offers and scheduling as registered protocols
+- [ ] Data commons: dataset hosting and access
+- [ ] Model and agent commons: shared model hosting, training feedback
 
 ## Future Considerations
 
