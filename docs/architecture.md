@@ -47,15 +47,16 @@ A cell is implemented as a cluster of microservices. The NucleusService acts as 
 1. **NucleusService** (NADI)
    - The cell's memory manager; depends on no other service
    - Holds the root seed and derives all cell keys; the journal's public key is the cell ID
-   - Defines the generic record envelope; services register their own record types and retention classes
-   - Keeps full records in an encrypted private store and commits their hashes to the public journal in Merkle epochs
-   - Produces proofs about any retained committed record
+   - Owns the journal, which is the cell's event chain: every block is an event (genesis, syncs, key changes, public transactions, revealed messages)
+   - Keeps full records in an encrypted, mutable private store and commits their hashes in each event's commitment root
+   - Never deletes; produces proofs about any committed record (redaction is an explicit, recorded exception)
 
 2. **MessageService** (NADI)
    - Depends only on the NucleusService
-   - Defines the generic message envelope and delivery (unicast, multicast, broadcast) between cells
+   - Reliable delivery over pairwise links: sender-owned link cores, an inbox, signed delivery receipts, offline delivery through blind replicas
+   - Multicast through per-sender topic cores
    - Defines no message types: services register handlers for their own protocols (e.g. an AuthService registers `auth/1`)
-   - Records message receipts through the Nucleus, at a journal mode each protocol chooses
+   - Records sends, receipts and inbox entries through the Nucleus
 
 3. **StateService**
    - Maintains local state
@@ -72,14 +73,10 @@ A cell is implemented as a cluster of microservices. The NucleusService acts as 
    - Stores identity and trust data in a Hypercore journal
 
 5. **ConsensusService** (NADI commons engine; see [proposal](nadi-consensus.md))
-   - Runs Hashgraph consensus per commons (co-op, market, data commons), not globally
-   - Each member's event chain is a Hypercore; checkpoints signed by > 2/3 of the weight
-   - Participation stats in checkpoints become identity evidence (commons attestations)
-   - Participates in Hashgraph consensus
-   - Propagates events to other cells
-   - Validates received events
-   - Maintains consensus state
-   - Stores consensus history in a Hypercore journal
+   - Runs Hashgraph over cells' journals in protocol-assigned clusters (~100 cells), nested into hyper-clusters through representatives
+   - Gives every event a global, causally consistent order across the network
+   - Finalizes checkpoints signed by > 2/3 of active weight; participation stats become identity evidence
+   - Clusters are network topology, not social organization: cells message anyone, and commons sit in PRANA
 
 ### Service Coordination
 
@@ -93,10 +90,11 @@ Services within a cell coordinate through:
 ### Data Storage
 
 Each cell has two kinds of storage, both managed by the NucleusService:
-- **Public journal**: one replicated Hypercore holding only Nucleus records — genesis, key attestations, epoch Merkle roots, immediate commitments and co-signed edge reveals. Anything in it is permanent and public.
-- **Private store**: an encrypted, never-replicated Hyperbee holding full records, message bodies and Merkle leaves. It can be segmented and pruned; pruning a record makes its commitment unprovable, so each record type declares a retention class (`permanent`, `window`, `ephemeral`).
+- **Journal**: one replicated Hypercore per cell holding its events (genesis, syncs, keys, public transactions, revealed messages), each with a commitment root over private records. Permanent and public.
+- **Private store**: an encrypted, mutable local store holding full records, message bodies and key material. Backed up as encrypted, erasure-coded shards across custodians.
+- **Link and topic cores**: sender-owned cores that carry messages to counterparties and subscribers.
 
-Whether the private store is split per service or per time period is an implementation choice to be benchmarked; only epoch roots are public.
+Owners never delete their own data (Hypercore replicas cannot be recalled anyway); data held for other cells is kept according to explicit storage duties. See [NADI spec §4](nadi-journal-identity.md#4-storage-model).
 
 ## Messaging Protocol
 
@@ -107,13 +105,12 @@ The MessageService defines syntax only; services define the semantics of their o
 ```typescript
 interface Message {
     v: 1;
-    id: Bytes32;          // H(from ‖ seq ‖ ts), used for dedupe
+    id: Bytes32;          // H(from ‖ link ‖ index), used for dedupe
     from: Bytes32;        // sender cell ID (journal public key)
-    to: Bytes32 | Topic;  // a cell, or a topic for multicast/broadcast
+    to: Bytes32 | Topic;  // a cell, or a topic for multicast
     protocol: string;     // "<service>/<version>", e.g. "auth/1", registered by that service
     ts: number;
-    ttl?: number;         // hop limit for multicast / relay
-    body: Uint8Array;     // opaque; optionally sealed to the recipient's X25519 key
+    body: Uint8Array;     // opaque; the link or topic core is encrypted
     sig: Bytes64;         // sender's attested Ed25519 signing key over all fields
 }
 ```
@@ -122,9 +119,11 @@ There is no fixed `MessageType` enum. Former types such as AUTH, TX or QUERY bec
 
 ### Message Flow
 
-1. **Sending**: a service calls `message.send` (unicast) or `message.publish` (topic) with its protocol name and an opaque body; the MessageService signs and, if requested, seals the body.
-2. **Delivery**: unicast over a Hyperswarm connection to the recipient's attested swarm key; multicast by topic with dedupe on `id` and TTL. Delivery is at-most-once and unordered in v1.
-3. **Receiving**: the MessageService verifies the signature, records a receipt through the Nucleus, and dispatches to the handler registered for `protocol`. Unknown protocols are dropped.
+1. **Linking**: two cells agree to communicate and exchange the keys of their sender-owned link cores, encrypted with a shared link secret.
+2. **Sending**: the sender appends the message to its link core (or topic core); the block index is the per-link sequence number.
+3. **Delivery**: live Hypercore replication while both are online; on startup the receiver pulls new blocks from every inbound link; blind replicas cover a sender that is offline.
+4. **Receiving**: the receiver verifies the signature, copies the body into its private store, appends an inbox entry, acknowledges in its own link core, and dispatches to the handler registered for `protocol`.
+5. **Guarantees**: no loss while any copy of the sender's core survives; exactly-once inbox delivery; FIFO per sender; global order from consensus.
 
 ## Network Architecture
 
@@ -150,7 +149,8 @@ There is no fixed `MessageType` enum. Former types such as AUTH, TX or QUERY bec
 ### Security Model
 
 1. **Identity Verification**
-   - Tiered verification: key possession (T1), continuity via cross-cell anchors (T2), social proof from relationship edges (T3), selective claims with Merkle proofs (T4)
+   - Tiered verification: key possession (T1), continuity via consensus timestamps (T2), relationship edges (T3a), cluster participation attestations (T3b), selective claims with Merkle proofs (T4)
+   - Journal forks (a cloned key) are self-contained proofs of compromise
    - Hybrid edge privacy: relationships are committed privately by default; a cell may reveal an edge, or a protocol may require one, and public reveals are co-signed by both cells
    - Trust network validation
    - Reputation-based access control

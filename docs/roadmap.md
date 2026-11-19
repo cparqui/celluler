@@ -58,33 +58,34 @@ Prerequisite for any other service registering journal records or message protoc
 
 ### 1. Keys and identity root
 - [ ] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
-- [ ] Cell ID = public journal key; replace generated UUID with `nucleus/genesis`
+- [ ] Cell ID = journal public key; replace generated UUID with a `genesis` event
 - [ ] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
-- [ ] `nucleus/key.add` / `nucleus/key.revoke` attestations
+- [ ] `key.add` / `key.revoke` events
 
 ### 2. Nucleus as memory manager
-- [ ] Deterministic record envelope (decide compact-encoding vs canonical JSON)
-- [ ] Record-type registration with retention classes (`permanent`, `window`, `ephemeral`)
-- [ ] Encrypted private store (Hyperbee) and type index
-- [ ] Salted leaf commitments and Merkle epochs (`nucleus/epoch`, `nucleus/commit`)
-- [ ] `record`, `query` and `prove` actions; proof verification
-- [ ] Replace raw `write` with `record`; fix double-encoded JSON
+- [ ] Journal as event chain: deterministic event format and kinds (decide compact-encoding vs canonical JSON)
+- [ ] Record and transaction type registration
+- [ ] Encrypted, mutable private store and type index
+- [ ] Salted leaf commitments; commitment root in each event
+- [ ] `record`, `emit`, `query`, `prove` and `redact` actions; proof verification
+- [ ] Replace raw `write`; fix double-encoded JSON
 
-### 3. Base MessageService
+### 3. Reliable MessageService
 - [ ] Depend only on the Nucleus (drop identity/consensus dependencies and the fixed message-type enum)
-- [ ] Generic signed envelope; protocol handler registration
-- [ ] Unicast over Hyperswarm with swarm-key attestation check
-- [ ] Topic multicast/broadcast with dedupe and TTL
-- [ ] Optional sealed bodies for relayed messages
-- [ ] Receipts recorded through the Nucleus (`none` / `hash` / `full` per protocol)
+- [ ] Link handshake, shared link secret, sender-owned link cores
+- [ ] Inbox, delivered/processed receipts, startup catch-up
+- [ ] Blind replicas for offline senders
+- [ ] First contact (introductions, rate-limited request topic)
+- [ ] Topic cores for multicast; link closure
+- [ ] Protocol handler registration
 
 ### 4. Edges and proofs
-- [ ] Private per-epoch edge attestations (`identity/edge`)
-- [ ] Co-signed public edge reveals (`nucleus/edge.reveal`)
+- [ ] Private edge records from real traffic (`identity/edge`)
+- [ ] Revealed `message` events and co-signed `edge.reveal` events
 - [ ] T1 possession and T4 selective-claim proofs
 
 ### 5. Private store backup
-- [ ] Daily segments with per-segment keys; crypto-shredding on prune
+- [ ] Hourly append-only backup chunks; per-record content keys (for redaction)
 - [ ] Reed-Solomon striping (4-of-7 default) to custodian shard cores
 - [ ] Custodian storage checks and repair
 - [ ] Shamir seed recovery via guardians (`backup/1` protocol)
@@ -92,7 +93,8 @@ Prerequisite for any other service registering journal records or message protoc
 ### 6. Multi-cell testing
 - [ ] In-process DHT (`hyperdht/testnet`) for all tests
 - [ ] Two-cell and N-cell (3, 10, 50) scenarios
-- [ ] Fault cases: revoked key, tampered record, unattested swarm key
+- [ ] Offline delivery: receiver offline, sender offline (blind replica)
+- [ ] Fault cases: revoked key, tampered record, unattested swarm key, cloned journal key
 - [ ] Benchmark private-store layouts (single, per-service, per-day)
 
 ## Phase 2: Network Foundation (NADI)
@@ -142,7 +144,7 @@ Prerequisite for any other service registering journal records or message protoc
 
 ## Phase 3: State and Consensus (NADI commons engine)
 
-Design: [NADI Commons Engine — Consensus & Identity](nadi-consensus.md) (proposal). Consensus is per commons, with event chains as Hypercores and participation feeding identity (T3b).
+Design: [NADI Consensus — Hierarchical Hashgraph over Cell Journals](nadi-consensus.md) (proposal). Hashgraph runs over cells' journals in protocol-assigned clusters of *N* (starting at 100), nested through representatives; parameters are tuned by testing.
 
 ### 1. Core Services (Continued)
 - [ ] StateService
@@ -152,12 +154,13 @@ Design: [NADI Commons Engine — Consensus & Identity](nadi-consensus.md) (propo
   - [ ] Hypercore journal
   - [ ] Unit tests
 
-- [ ] ConsensusService (Hashgraph, per commons)
-  - [ ] C1: event cores and DAG sync; bandwidth measurement
-  - [ ] C2: virtual voting — rounds, witnesses, fame, consensus order and timestamps
-  - [ ] C3: checkpoints, admission transactions, fork proofs
-  - [ ] C4: participation stats, T3b commons attestations, epoch-root anchoring
-  - [ ] C5: private commons (eras), federation
+- [ ] ConsensusService (hierarchical Hashgraph)
+  - [ ] C1: journals as events, two-way ping syncs with verifiable partners; bandwidth and journal growth
+  - [ ] C2: virtual voting — local order and timestamps; sweep N and sync rate for finality latency
+  - [ ] C3: checkpoints, active roster and liveness, fork proofs
+  - [ ] C4: two-level hierarchy — representatives, cross-links, causally adjusted global order, watermarks
+  - [ ] C5: participation stats and T3b attestations
+  - [ ] C6: split/merge, reshuffling, three levels in simulation
   - [ ] Unit and multi-cell tests
 
 ### 2. Integration Testing

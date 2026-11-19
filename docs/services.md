@@ -129,7 +129,7 @@ The NADI base services define **syntax**; other services define **semantics** by
 
 ### 1. NucleusService
 
-The cell's memory manager: owns the root seed and derived keys, the public journal (commitments only), the encrypted private store, retention and proofs.
+The cell's memory manager: owns the root seed and derived keys, the journal (the cell's event chain), the encrypted private store, backups and proofs.
 
 ```javascript
 // Interface sketch (see spec §6.1)
@@ -138,22 +138,26 @@ The cell's memory manager: owns the root seed and derived keys, the public journ
 await ctx.call("nucleus.registerRecordType", {
     type: "msg/received",            // "<service>/<record>"
     owner: "message",
-    retention: { class: "window", maxAge: "30d", maxBytes: "1GB" },
-    visibility: "private"            // "private" = Merkle epoch leaf, "public" = journal record
 });
 
+// Public transaction types appear in the journal as `tx` events
+await ctx.call("nucleus.registerTxType", { type: "prana/vote", owner: "prana-governance" });
+
 // Record: stores the full record privately, commits its salted hash
-const { epoch, index, leaf } = await ctx.call("nucleus.record", {
+const { seq, leaf } = await ctx.call("nucleus.record", {
     type: "msg/received",
     body,                            // encoded by the owning service
     refs: []                         // optional links to other cells' commitments
 });
 
-// Query the private store by type (local Hyperbee index)
+// Query the private store by type
 await ctx.call("nucleus.query", { type: "msg/received", limit: 100 });
 
 // Produce a proof about a retained record (leaf-only or full disclosure)
-await ctx.call("nucleus.prove", { epoch, index, disclose: "full" });
+await ctx.call("nucleus.prove", { seq, disclose: "full" });
+
+// Redaction is an explicit, recorded exception; owners never delete
+await ctx.call("nucleus.redact", { seq, reason });
 
 // Identity
 await ctx.call("nucleus.getCellId");      // public journal key, hex
@@ -163,26 +167,28 @@ Services never write cores directly; the journal is append-only, so there is no 
 
 ### 2. MessageService
 
-Defines how a generic message moves from one cell to one or many cells. It defines no message types and does not depend on identity or consensus services.
+Moves messages reliably between cells over pairwise links and topics. It defines no message types and depends only on the Nucleus.
 
 ```javascript
 // Interface sketch (see spec §9)
 
 // A service registers the protocol it owns, e.g. in AuthService.started()
-await ctx.call("message.register", {
-    protocol: "auth/1",
-    handler: "auth.onMessage",       // Moleculer action called on receipt
-    journal: "hash"                  // receipts: "none" | "hash" | "full"
-});
+await ctx.call("message.register", { protocol: "auth/1", handler: "auth.onMessage" });
 
-// Unicast to a cell (by cell ID); encrypt seals the body to the recipient
-await ctx.call("message.send", { to: cellId, protocol: "auth/1", body, encrypt: true });
+// Handshake: both cells agree to communicate and exchange link core keys
+await ctx.call("message.link", { to: cellId });
 
-// Multicast / broadcast to a topic
-await ctx.call("message.publish", { topic: "coop/la-paz", protocol: "prana-vote/1", body, ttl: 4 });
+// Send: appended to this cell's link core for the recipient
+const { id, index } = await ctx.call("message.send", { to: cellId, protocol: "auth/1", body });
+
+// Multicast: appended to this cell's topic core
+await ctx.call("message.publish", { topic: "coop/la-paz", protocol: "prana-vote/1", body });
+
+// Delivery state from the recipient's receipts
+await ctx.call("message.status", { id });   // "sent" | "delivered" | "processed"
 ```
 
-On receipt the MessageService verifies the sender's signature, records a receipt through the Nucleus, and dispatches to the registered handler. Unknown protocols are dropped. Delivery is at-most-once and unordered in v1.
+On receipt the MessageService verifies the sender's signature, copies the body into the private store, appends an inbox entry, acknowledges in its own link core, and dispatches inbox messages in arrival order to the registered handler. Unknown protocols are recorded but not dispatched. Inbox delivery is exactly-once; handlers must be idempotent by message `id`.
 
 ### 3. StateService
 
@@ -274,7 +280,7 @@ export default class StateService extends Service {
 
 ### 4. IdentityService
 
-Manages cell identity and trust networks. Under the NADI spec it records private per-epoch relationship edges (`identity/edge`) through the Nucleus, handles co-signed public edge reveals, and verifies T2/T3 identity claims (spec §7–§8). The sketch below predates the spec and will be revised.
+Manages cell identity and trust networks. Under the NADI spec it records private relationship edges from real traffic (`identity/edge`) through the Nucleus, handles co-signed public edge reveals, and verifies T2/T3 identity claims (spec §7–§8). The sketch below predates the spec and will be revised.
 
 
 ```javascript

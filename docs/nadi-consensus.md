@@ -1,196 +1,272 @@
-# NADI Commons Engine — Consensus & Identity
+# NADI Consensus — Hierarchical Hashgraph over Cell Journals
 
-**Status:** Proposal v0.1 (2026-11-17) · **Layer:** NADI (L1) · **Builds on:** [NADI Journal, Identity & Messaging](nadi-journal-identity.md)
+**Status:** Proposal v0.2 (2026-11-18) · **Layer:** NADI (L1) · **Builds on:** [NADI Journal, Identity & Messaging](nadi-journal-identity.md)
 
-This proposal describes how Celluler reaches consensus within a commons using the Hashgraph algorithm, and how faithful participation in that consensus becomes evidence for a cell's identity. The core idea: **the same gossip that orders a commons' transactions is a dense, signed record of who interacted with whom and when — and that record is exactly what identity verification needs.**
+This proposal describes how Celluler orders every cell's events across the whole network, and how faithful participation in that process becomes evidence of identity. It is a **proposal**: the hierarchical construction in §5–§6 is new, not part of the published Hashgraph algorithm, and needs a correctness argument and simulation before it is relied on (§14).
 
-## 1. How Hashgraph gossip works (and what it costs)
+### Changes from v0.1
+- Consensus runs on **topological clusters** assigned by the protocol, not on commons. Commons (co-ops, decision circles, markets) are PRANA-layer organizations that *use* the global order.
+- **Events are journal blocks**; there are no separate event cores.
+- v1 drives consensus with **ping syncs** to verifiably random partners; syncing on real traffic is a later upgrade (§12).
+- Cross-cluster order uses **causally adjusted consensus timestamps with watermarks** (§6), replacing ordering by checkpoint position, which can produce cycles.
+- All parameters are expressed symbolically (§3) with starting values.
 
-"Gossip about gossip" does not mean a cell announces every message it receives to all of its peers; that would cost O(N²) messages per message. Instead:
+## 1. Hashgraph in brief
 
-1. A cell repeatedly picks a peer at random and **syncs**: it sends the events the peer has not seen.
-2. After each sync the receiving cell creates **one new event** containing:
-   - the hash of its own previous event (*self-parent*),
-   - the hash of the last event it received from the peer (*other-parent*),
-   - a timestamp,
-   - any transactions it wants to submit (for example, hashes of messages it has received).
-3. Those parent hashes form a DAG. Every cell eventually holds the same DAG, so each can compute, locally and without exchanging any votes, how every other cell *would* vote (**virtual voting**). This yields a total order of events and a **consensus timestamp** for each: the median of the times members first received it.
+Hashgraph (Baird, Swirlds 2016) reaches asynchronous Byzantine fault-tolerant consensus among a **fixed, known set of members**, safe while honest members hold more than 2/3 of the weight.
 
-So the "I received message *z* from cell *x* at time *t*" announcements are carried as transactions inside events, batched into one event per sync. Who learned what, from whom, and when is encoded in the DAG itself.
+- **Events.** Each member creates signed events. An event contains a hash of the member's previous event (*self-parent*), a hash of the last event received from the peer it just synced with (*other-parent*), a timestamp, and optional transactions.
+- **Gossip about gossip.** Members sync with each other; each sync produces a new event that records it. The resulting DAG is a record of who heard what, from whom, and when.
+- **Virtual voting.** Every member holds the same DAG, so each computes how every other member *would* vote without any vote messages. This yields rounds, famous witnesses, and a **consensus order** of all events.
+- **Consensus timestamp.** Each event's timestamp is the median of the times members first received it, which is fair as long as honest members' clocks are roughly right.
 
-### 1.1 Cost model
+In Celluler, **a Hashgraph event is a journal event** (spec §5.1): the self-parent is the previous journal block, the other-parent is the event's `otherParent`, and the signature is the journal's Hypercore signature. A fork in a journal is exactly Hashgraph's equivocation.
 
-An event with no transactions is ~170 B (other-parent reference ~68 B, timestamp 8 B, Hypercore signature and tree hash ~96 B). With *N* members each syncing at rate *f* per second, *N·f* events are created per second and every member must receive all of them:
+## 2. Prior art: what Hashgraph and Hedera do not provide
 
-| Members N | Bandwidth per member at f = 1/s | at f = 1/60 s (idle heartbeat) |
+- The Hashgraph algorithm defines consensus for **one flat membership**. It has no notion of nested groups.
+- Hedera runs **one flat network**. Its mainnet consensus nodes are permissioned and operated by the Hedera Governing Council; mirror nodes store history but do not participate in consensus.
+- Hedera's node count is in the tens, not thousands. Its plan has been to expand to hundreds of permissioned nodes and eventually permissionless ones.
+- Sharding Hedera is a research topic, not a production feature. A September 2025 paper proposes a hybrid model with local committees and a global coordinator, using random node assignment to keep any single entity from dominating a shard, and periodic reconfiguration.
+
+Related work in sharded BFT (for example Elastico, OmniLedger and RapidChain) uses the same ingredients: random assignment to committees, periodic reshuffling, and cross-shard coordination. What is specific to Celluler is ordering *every cell's own signed journal* globally, with cross-cluster messages as causal links, which is why §5–§6 need their own correctness work.
+
+## 3. Parameters
+
+| Symbol | Meaning | Starting value |
 |---|---|---|
-| 10 | 1.7 KB/s | 28 B/s |
-| 50 | 8.5 KB/s | 142 B/s |
-| 200 | 34 KB/s | 567 B/s |
-| 1,000 | 170 KB/s | 2.8 KB/s |
+| *N* | target cells per level-0 cluster | 100 (split above 2*N*, merge below *N*/2) |
+| *M* | child units per hyper-cluster at each level ≥ 1 | 100 |
+| *k* | representatives per child in its parent instance | 3 |
+| *L* | number of levels | ⌈log(cells / *N*) / log *M*⌉ + 1 |
+| *f*₀, *f*ℓ | sync (ping) rate per participant at level 0, level ℓ | 1/60 s |
+| *C*ℓ | checkpoint interval at level ℓ | 1 h (to be tuned; §9) |
+| *R* | rounds after checkpoint that others' events are kept | to be tuned |
+| *s* | event size | ~170 B (+ ~80 B Hypercore tree per block) |
 
-Per-member cost grows linearly with commons size (quadratically network-wide). Two consequences:
+Coverage is *N* · *M*^(*L*−1): with *N* = *M* = 100, three levels cover 10⁶ cells. With *N* = 12, covering 10⁶ cells needs six levels.
 
-- **Consensus is scoped to a commons, not global** (§2).
-- **Sync rate is adaptive**: high while transactions are pending, a slow heartbeat when idle. At N = 50, retaining every event would cost ~734 MB/day at f = 1/s but ~12 MB/day at idle rate; in practice the DAG is pruned after checkpoints (§5), so only checkpoints are kept long term.
+## 4. Level-0 clusters
 
-## 2. Commons
+### 4.1 What a cluster is
 
-A **commons** is a consensus group: a co-op, a PRANA market, a BUDDHI data or compute commons, a neighborhood. Each commons has:
+A cluster is a set of about *N* cells that run one Hashgraph instance together. Clusters are **topology, not social organization**: a cell's cluster says nothing about who it may talk to. Cells message any cell in the network (spec §9); messages that cross clusters create causal links that the hierarchy resolves (§6).
 
-| Parameter | Example default |
-|---|---|
-| `commonsId` | hash of the genesis transaction (founding members + parameters) |
-| Membership and weights | founding members, equal weight |
-| Admission rule | consensus vote, ≥ 2/3 weight; may require identity evidence (§6.4) |
-| Weight policy | `equal` (one member, one vote) — see §6.5 |
-| Sync rate | adaptive, 1/s active, 1/60 s idle |
-| Checkpoint interval | every *C* rounds, targeting ~1 h |
-| Privacy | `open` (anyone may replicate events) or `members` (events encrypted with a commons key) |
+### 4.2 Assignment
 
-Practical size is tens to low hundreds of members. Larger communities federate (§7).
+- On joining the network, a cell is assigned to a cluster by **verifiable randomness** from the current top-level checkpoint, so an attacker cannot choose its cluster and its share in any cluster tracks its share of the network.
+- Assignment may be weighted by measured network latency, but not by social trust: letting cells pick clusters by trust would let an attacker concentrate in one.
+- Clusters split above 2*N* and merge below *N*/2; a fraction of cells is **reshuffled** each period to resist adaptive corruption (an attacker targeting the members of one cluster over time).
 
-## 3. Events as Hypercores
+### 4.3 v1 syncs: verifiable random pings
 
-Each member's chain of events in a commons is **its own Hypercore** (an *event core*), keyed by `H(seed, "celluler/commons/v1" ‖ commonsId)`:
+- Each cell syncs at rate *f*₀. Its partner for the next sync is `members[H(lastEventHash) mod |members|]`, so anyone can check that it synced with whom it was supposed to.
+- Syncs are **two-way**: both cells exchange missing journal blocks (Hypercore replication) and each appends a `sync` event whose `otherParent` is the other's latest event.
+- Cluster members replicate all members' journals for the duty window (spec §4.3).
 
-- **Self-parent is implicit**: event *i* is block *i*; its self-parent is block *i − 1*.
-- **Signatures are Hypercore's**: every append is signed by the event core's key, so events need no separate signature field.
-- **Sync is Hypercore replication**: members replicate each other's event cores on a commons topic; Hypercore already sends exactly the blocks the peer is missing, which is the Hashgraph sync step.
-- **Equivocation is a fork**: a cell that signs two different blocks at the same index has produced a self-contained cryptographic proof of misbehavior (§6.3).
+### 4.4 Roster, liveness and offline cells
 
-Event block body:
+Hashgraph needs more than 2/3 of the weight **online** to make progress. Cells that go offline (phones asleep, laptops closed) would stall a cluster, so:
 
-```
-Event {
-  otherParent: { core: bytes32, index: uint, hash: bytes32 }
-  ts:          uint            // creator's claimed time
-  txs:         [Tx]            // may be empty
-}
+- The cluster's **active roster** is itself consensus state; a cell missing *T*off of syncs is suspended (weight 0) by a deterministic rule, and resumes by syncing again.
+- Weight is equal among active members.
+- Safety requires more than 2/3 of active weight to be honest; liveness requires more than 2/3 of active weight to be online.
 
-Tx = MessageRef { id, from, protocol, bodyHash }     // a message this cell received
-   | Submit     { type, body }                        // a commons-level transaction
-   | Sig        { checkpoint: bytes32 }               // checkpoint signature (§5)
-   | Anchor     { epoch, root }                       // this cell's own journal epoch root (§6.2)
-```
+### 4.5 Members' events from outside the cluster
 
-Event-core keys are **not** attested in the public journal (that would publish commons membership). A cell joins by sending a join request, signed with its root key and carrying its event-core key, to existing members over the message service; membership becomes known to the commons only.
+An event in a cluster's DAG may have an `otherParent` in another cluster (a cross-cluster sync or revealed message). **Projection rule:** for virtual voting, such a parent is treated as absent, since its creator is not a member; it is kept as a causal reference for global ordering (§6). Whether Hashgraph's safety and liveness proofs hold unchanged for events whose other-parent is outside the membership is the first correctness question to settle (§14).
 
-For `members`-privacy commons, event cores are encrypted with the commons key. Because a Hypercore's encryption key is fixed, removing a member starts a new **era** with fresh event cores under a new key.
+### 4.6 Local order and checkpoints
 
-## 4. Messages and consensus
+The cluster's Hashgraph produces a **local consensus order** with consensus timestamps. Timestamps are made monotone along that order (*t*′ᵢ = max(*t*ᵢ, *t*′ᵢ₋₁ + 1 ns)) so that "all of this cluster's events before time *T*" is well defined once its order passes *T*.
 
-- Commons-wide messages are sent with `message.publish({ topic: commonsId, … })` as defined in the messaging spec.
-- A member that receives one records the usual receipt and includes a `MessageRef` in its next event.
-- The message's **consensus timestamp** is that of the first event in consensus order that references it. This replaces self-asserted timestamps for anything that happened inside a commons.
-- Commons-level state changes (votes, membership, ledger entries) are `Submit` transactions whose `type` is owned by the service that registered it (PRANA, BUDDHI, Identity), following the same syntax/semantics split as the base layers.
-
-## 5. Checkpoints
-
-Every *C* rounds, each member computes deterministically from the consensus order:
+Every *C*₀, the cluster finalizes a checkpoint:
 
 ```
 Checkpoint {
-  commonsId, round, era
-  prev:           bytes32      // previous checkpoint hash
-  stateRoot:      bytes32      // commons state after this round
-  membershipRoot: bytes32      // members and weights
-  statsRoot:      bytes32      // participation stats per member (§6.1)
-  evidenceRoot:   bytes32      // misbehavior proofs accepted this window
+  level: 0, cluster, seq, prev
+  window: { fromTime, toTime }
+  orderRoot:      bytes32   // Merkle root of (cell, index, hash, t', g) in local order (§6.2)
+  pending:        [event]   // events whose g awaits a foreign parent; finalized in a later checkpoint
+  crossLinks:     [{ event, foreignParent }]   // events with parents outside the cluster
+  rosterRoot, statsRoot, evidenceRoot
+  reps:           [cellId]  // representatives for the next period (§5.2)
 }
 ```
 
-Members sign the checkpoint hash with `Sig` transactions; it is **final** once signatures from > 2/3 of the weight appear in consensus order. A finalized checkpoint is a compact, portable statement that an outsider can verify by following the checkpoint chain from genesis (each checkpoint fixes the membership and weights that sign the next).
+It is final when members holding more than 2/3 of active weight have signed it (signatures travel as `tx` events, spec §5.2). With *N* = 100 that is 67 signatures, ~6.6 KB per checkpoint without aggregation.
 
-After finality, events older than the last *R* rounds can be pruned by everyone; the checkpoint carries everything needed going forward.
+## 5. Higher levels
 
-## 6. Consensus and identity together
+### 5.1 Hyper-clusters
 
-### 6.1 Participation stats
+At level ℓ ≥ 1, a hyper-cluster groups *M* child units (clusters at level 0, hyper-clusters above). It runs a parent Hashgraph instance whose purpose is to **agree on the children's finalized checkpoints** and on everything that spans children: roster changes, assignment randomness, watermarks (§6.2), cross-child state, and misbehavior.
 
-Per member, per checkpoint window, computed identically by every member from the DAG:
+### 5.2 Representatives, not all cells
+
+If every cell of a hyper-cluster participated in the parent instance, each would process *N* · *M* members' events and the hierarchy would not scale. The parent instance therefore has **k representatives per child**, *M* · *k* members in total (300 at the starting values):
+
+- Representatives are chosen by **sortition** each period: the *k* active members with the smallest `H(checkpointHash ‖ cellId)` in the child's latest checkpoint. Anyone can verify the choice.
+- A representative cannot forge its child's checkpoint (it carries the child's > 2/3 signatures); it can only withhold it, so *k* ≥ 2 and any representative may submit any child's checkpoint.
+- Weight is equal per child, split among its live representatives.
+- A representative uses its **one journal** for both levels: its events count as members' events in both its cluster and the parent instance, with parents from the other level treated per the projection rule (§4.5).
+
+### 5.3 Parent checkpoints
+
+Each parent instance finalizes its own checkpoints (signed by > 2/3 of representative weight), committing to the set of child checkpoints accepted, the watermark (§6.2), roster and assignment changes, and evidence. It does not need to hold every event: the global order is implicit in each event's global time *g*, which its own cluster's checkpoint commits to. Its parent does the same, up to level *L* − 1.
+
+## 6. Global order
+
+The goal: for any two events anywhere, the system can assert which came first, e.g. that cell A's message to B preceded cell C's message to D. The order must respect causality (if one event is an ancestor of another, it comes first) and must be the same for everyone.
+
+### 6.1 Why checkpoint position is not enough
+
+A first idea is to order children's checkpoints in the parent's consensus order and concatenate their local orders. That fails: each cluster's local order is consistent only with the ancestry it can see. If an event in cluster C₁ descends from another C₁ event through a path that leaves and re-enters the cluster (C₁ → C₂ → C₁), C₁ can order the two the wrong way round, and concatenation then produces a cycle with C₂'s order.
+
+### 6.2 Proposed rule: causally adjusted timestamps with watermarks
+
+Each event *e* gets a **global time** *g*(*e*):
+
+```
+g(e) = max( t′(e),  g(selfParent(e)) + ε,  g(otherParent(e)) + ε )
+```
+
+- *t*′(*e*) is its monotone local consensus time (§4.6); ε is 1 ns.
+- *g* strictly increases along every parent edge, so sorting by (*g*, cell ID, index) is always a valid causal order, with no cycles.
+- Between causally unrelated events in different clusters, order follows consensus time, i.e. the median of honest clocks, so it is fair to clock precision rather than to checkpoint granularity.
+
+**Watermarks.** A position in the global order is final only when no event with a smaller *g* can still appear. Because *g*(*e*) ≥ *t*′(*e*) and local times are monotone, once every cluster under a parent has finalized a checkpoint covering time *W*, every event with *g* < *W* is known. The parent records *W* (the minimum across children). Comparing any two events below *W* then needs only their *g* values, each proven by a Merkle path from its cluster's checkpoint.
+
+**Late clusters.** A cluster that misses its checkpoint deadline would hold back everyone's watermark. The parent may declare it late by consensus; that cluster's late events then get *g* = max(*g*, time of the parent's decision), so lateness delays only the late cluster's events.
+
+**Dependencies.** An event whose foreign parent is not yet final has a provisional *g*; clusters publish final values as dependencies resolve. Chains alternating between clusters resolve in order because ancestry is acyclic.
+
+### 6.3 Local order vs global order
+
+The local order of a cluster may differ from the global order in the rare cases where cross-cluster causality forces it. Services must use the **global order** for any state that spans clusters, and may use the faster local order for state confined to one cluster.
+
+### 6.4 Where messages sit in the order
+
+| Message kind (spec §8) | Position in the global order |
+|---|---|
+| Revealed (`message` event linked to the sender's event) | Exact: send < receipt by causality |
+| Committed (private) | The interval between the sender's event that commits the send and the receiver's event that commits the receipt; provable on disclosure |
+
+### 6.5 Finality latency
+
+Local finality takes several Hashgraph rounds, and each round needs information to spread through the cluster, roughly log₂ *N* sync intervals. At *N* = 100 and *f*₀ = 1/60 s that is likely **tens of minutes** per local finality, before adding *C*₀ and each parent level. Faster finality needs a higher sync rate, which grows every cell's journal proportionally (§9). This trade-off is the main thing the C1–C2 tests must measure.
+
+## 7. Cross-cluster messages
+
+A cross-cluster message costs the same transport as any message (spec §9). For ordering:
+
+- The sender's and receiver's events are ordered in their own clusters.
+- If the receipt is revealed, the receiver's event has a foreign `otherParent`; its cluster lists it in `crossLinks`; the parent's global order places it after the send.
+- If the receipt is committed, ordering is the interval rule in §6.4.
+
+The receiver's cluster needs only the sender's single event and its signed journal length to verify the link, not the sender's cluster DAG.
+
+## 8. Consensus and identity
+
+### 8.1 Participation stats
+
+Per cell, per checkpoint window, computed identically by all cluster members:
 
 | Stat | Measures |
 |---|---|
-| Events created vs expected for sync rate | liveness |
-| Rounds with a witness; famous witnesses | substantive participation in ordering |
-| Median delay before other members' events are seen by this member's events | gossip timeliness |
-| Distinct sync partners (count only) | breadth of interaction |
-| Messages first referenced (`MessageRef` earliest in order) | contribution / relaying |
-| Checkpoints signed | responsibility |
-| Equivocations | dishonesty (any > 0 is disqualifying) |
+| Syncs completed vs expected at *f*₀ | liveness |
+| Syncs with the assigned random partner | protocol faithfulness (not choosing partners) |
+| Rounds with a witness; famous witnesses | participation in ordering |
+| Median delay before others' events are seen | timeliness |
+| Checkpoints signed; representative terms served | responsibility |
+| Equivocations (forks) | dishonesty: any > 0 is disqualifying |
 
-Stats are cumulative (lifetime totals plus the current window), so the latest checkpoint alone summarizes a member's history.
+Stats are cumulative, so the latest checkpoint summarizes a cell's whole history.
 
-### 6.2 Better time anchors (T2)
+### 8.2 Time anchors (T2)
 
-A member includes `Anchor { epoch, root }` transactions for its own journal epochs. The commons then gives each of the cell's epoch roots a consensus timestamp agreed by > 2/3 of the weight — a much stronger continuity proof than pairwise anchors.
+Every event a cell creates receives a consensus timestamp agreed by > 2/3 of its cluster. A cell's age and continuity are therefore attested by its cluster, not self-asserted.
 
-### 6.3 Misbehavior evidence
+### 8.3 Continuous possession (T1)
 
-Two signed blocks at the same index of one event core are a fork proof. Any member that sees one submits it; once in consensus order, the commons' rules apply deterministically (default: weight set to 0, removal at next checkpoint) and the proof enters `evidenceRoot`. A fork proof is self-contained, so it can be shown to anyone outside the commons as a negative attestation.
+Every `sync` commits to the partner's latest event, so each proves the cell held its journal key at that moment (spec §7.2).
 
-### 6.4 New identity tier: commons attestation
+### 8.4 Participation attestation (T3b)
 
-The identity tiers in the messaging spec (§7) gain a communal tier between pairwise social proof and selective claims:
+"Cell X has participated faithfully since checkpoint *k*, with stats S and no equivocation" is proven by a finalized checkpoint (> 2/3 signatures) plus the Merkle path of X's stats line, ~6.6 KB at *N* = 100 (~300 B with aggregate signatures). Faking it means sustaining verifiably random syncs observed by a supermajority over time.
 
-| Tier | Claim | Evidence |
+### 8.5 Misbehavior
+
+A fork in a journal is self-contained proof. Once in consensus order, the cell's weight drops to 0 and the proof enters `evidenceRoot`; it can be shown to anyone as a negative attestation. Random-partner violations are provable from the cell's own events.
+
+### 8.6 Sybil resistance
+
+Hashgraph assumes the membership is not Sybil-controlled; it provides no Sybil resistance itself. Random assignment ensures an attacker's share in a cluster tracks its share of the network, so the barrier must be at **network admission**. Options (open question §14): vouching through revealed edges (T3a), T3b attestations from existing cells, proof-of-personhood integrations, or a cost to join. Social trust shapes links, edges and commons, not cluster membership.
+
+## 9. Costs
+
+| Cost | Formula | *N* = *M* = 100, *k* = 3, *f* = 1/60 s |
 |---|---|---|
-| T3a Pairwise social proof | "X has real relationships" | Edge attestations (messaging spec §8) |
-| **T3b Commons attestation** | "X has been a member of commons C since checkpoint *k*, with participation S, and no misbehavior" | Finalized checkpoint (> 2/3 weight signatures) + Merkle path of X's stats line in `statsRoot` |
+| Bandwidth per cell (level 0) | *N* · *f*₀ · *s* | ~283 B/s |
+| Extra bandwidth per representative | *M* · *k* · *f*₁ · *s* + *M* · (checkpoint)/*C*₀ | ~850 B/s + ~180 B/s |
+| Own journal growth | *f*₀ · (*s* + 80 B) | ~131 MB/year |
+| Cluster DAG held (duty window, 6 h) | *N* · *f*₀ · *s* · window | ~6 MB |
+| Own cluster's checkpoints kept | (200 B + ⌈2*N*/3⌉ · 96 B) / *C*₀ | ~58 MB/year (~3 MB aggregated) |
 
-T3b is stronger than T3a because faking it means sustaining faithful participation, observed by a supermajority of a commons, over time. Proof size: one checkpoint header (~200 B) + signatures (≈ 96 B × signers; ~3.3 KB for 34 of 50 members) + a stats path (~32 B × log₂ N). Aggregate signatures can shrink this later.
+Raising *f*₀ to 1/10 s cuts round time ~6× but raises journal growth to ~790 MB/year per cell. Lowering it to 1/300 s gives ~26 MB/year but slower finality.
 
-Commons membership is itself an edge kind. Under the hybrid edge model, a commons may require members to reveal it (messaging spec §8.4); otherwise membership stays private and the cell discloses T3b proofs only to verifiers it chooses.
+## 10. What is recorded where
 
-Gossip also feeds pairwise edges automatically: each sync with a peer is an interaction, so the per-epoch `identity/edge` records (messaging spec §8.1) can be derived from sync history.
-
-### 6.5 Weights and Sybil resistance
-
-Hashgraph is safe while honest members hold more than 2/3 of the weight. It provides no Sybil resistance of its own, which is where identity comes in:
-
-- **Admission** is the Sybil barrier: a commons decides who joins, and may require identity evidence (T3a vouches from existing members, T3b attestations from other commons).
-- **Default weight policy is `equal`**, matching the co-op principle of one member, one vote.
-- Optional policies: tenure- or participation-weighted with a cap, or delegated. Token-stake weighting is never a default; a PRANA commons may choose it explicitly.
-
-The loop: identity gates and weights consensus membership; faithful consensus participation produces the strongest identity evidence.
-
-## 7. Federation
-
-A cell can belong to many commons. Commons can anchor each other by including other commons' finalized checkpoint hashes as transactions, producing a web of mutually anchored commons. A network-wide PRANA ledger could later be a commons whose members are delegates of other commons. This is out of scope for the first implementation.
-
-## 8. Storage, retention and backup
-
-| Data | Where | Retention class |
+| Data | Where | Kept |
 |---|---|---|
-| Own event core | event core (shared with commons) | `window`: pruned after checkpoint + *R* rounds |
-| Other members' event cores | replicated locally | `window`: same |
-| Finalized checkpoints (latest + one per day) | private store, `consensus/checkpoint` | `permanent` (~4 KB each ≈ 1.5 MB/year per commons) |
-| Own stats line + Merkle path | private store, `consensus/participation` | `permanent` |
-| Misbehavior proofs involving this cell | private store, `consensus/evidence` | `permanent` |
-| Commons message receipts | private store, `msg/received` (+ consensus timestamp) | per protocol |
-| Public journal | nothing commons-specific by default | — |
+| Own events (syncs, txs, keys, revealed messages) | own journal | forever |
+| Cluster members' events | replicated journals | duty window: until checkpoint + *R* rounds |
+| Own cluster's finalized checkpoints | private store | forever |
+| Own stats line + path | private store | forever |
+| Parent-level events and checkpoints | representatives' storage | during term + duty window |
+| Fork proofs involving this cell | private store | forever |
 
-Private records are committed to the public journal through ordinary epochs and backed up through the private-store backup protocol (messaging spec §10).
+## 11. Security sketch
 
-## 9. Implementation plan
+**Cluster size.** A cluster of *N* tolerates ⌊(*N* − 1)/3⌋ faulty members. If a fraction *p* of all cells is malicious and assignment is random, the chance that a given cluster exceeds its tolerance is:
 
-The reference implementation (Hiero, under Linux Foundation Decentralized Trust) is Java and Apache 2.0, which includes a patent licence; Celluler needs a JavaScript implementation on the Holepunch stack.
+| *N* | Tolerates | *p* = 10% | *p* = 20% | Expected failing clusters in 10⁶ cells (*p* = 20%) |
+|---|---|---|---|---|
+| 12 | 3 | 2.6 × 10⁻² | 2.1 × 10⁻¹ | ~17,000 |
+| 25 | 8 | 4.6 × 10⁻⁴ | 4.7 × 10⁻² | ~1,900 |
+| 50 | 16 | 3.8 × 10⁻⁶ | 1.4 × 10⁻² | ~290 |
+| 100 | 33 | 7.0 × 10⁻¹¹ | 7.4 × 10⁻⁴ | ~7 |
+| 200 | 66 | 1.5 × 10⁻¹⁹ | 5.3 × 10⁻⁶ | ~0 |
 
-1. **C1 — Event cores and DAG sync:** N cells on `hyperdht/testnet` replicate event cores; measure bandwidth against §1.1.
-2. **C2 — Virtual voting:** rounds, witnesses, fame, consensus order and timestamps; validate with deterministic DAG test vectors (ideally cross-checked against Hiero on the same DAG).
-3. **C3 — Checkpoints and membership:** checkpoint signing and finality, admission transactions, fork proofs.
-4. **C4 — Identity integration:** participation stats, T3b proofs, epoch-root anchoring, edges from sync history.
-5. **C5 — Private commons and federation:** encrypted event cores, eras, cross-commons anchoring.
+*N* = 100 is a sound start at 10% adversarial share but not at 20%, which argues for strong network admission (§8.6), reshuffling, and parent-level detection of failed clusters (conflicting checkpoints from one cluster are provable at the parent).
 
-Autobase (Holepunch's multi-writer causal DAG over Hypercores) is worth evaluating as plumbing for C1, though it is not designed for Byzantine members, so virtual voting would still sit on top.
+**Parents.** Representatives are a random sample of children's members, so a parent instance of *M* · *k* = 300 behaves like a large cluster. Withholding is mitigated by *k* ≥ 2 and any-representative submission.
 
-## 10. Open questions
+**Decision circles of ~12 people** are PRANA-layer commons whose votes are ordered by this global order; they do not need to be consensus clusters.
 
-1. **Weight policy defaults** beyond `equal`, and how weights change with participation.
-2. **Admission evidence:** which identity tiers a commons should require by default.
-3. **Checkpoint interval and *R*:** proof freshness vs storage.
-4. **Stats privacy:** are distinct-partner counts and timeliness too revealing even within a commons?
-5. **Signature aggregation** (BLS or similar) to shrink T3b proofs.
-6. **Era rotation cost** for `members` commons with frequent membership changes.
-7. **Federation semantics:** what anchoring between commons should mean for trust.
+## 12. Upgrade path: syncs on real traffic
+
+Once the ping baseline is measured, messages between cluster members can double as syncs (the receipt event's `otherParent` is the sender's event), with pings only as a fallback when the DAG is not mixing (no round progress within a timeout, or too few distinct partners). Safety does not depend on how partners are chosen; mixing speed does. Revealed-message syncs fit directly; committed messages cannot serve as syncs without revealing the link, so pings remain for private traffic.
+
+## 13. Implementation plan
+
+1. **C1 — Journals as events, DAG sync:** *N* cells on `hyperdht/testnet`, two-way syncs, verifiable partners; measure bandwidth and journal growth against §9.
+2. **C2 — Virtual voting:** rounds, witnesses, fame, local order and timestamps, with deterministic DAG test vectors (ideally cross-checked against the Hiero reference implementation); sweep *N* and *f*₀ for finality latency.
+3. **C3 — Checkpoints, roster, liveness:** signing and finality, suspension of offline cells, fork proofs.
+4. **C4 — Two-level hierarchy:** representatives, parent instance, cross-links, causally adjusted global order and watermarks; adversarial tests for cycles and late clusters.
+5. **C5 — Identity integration:** participation stats, T3b proofs.
+6. **C6 — Scale and reshuffling:** split/merge, reshuffles, three levels in simulation.
+
+The reference implementation (Hiero, under Linux Foundation Decentralized Trust) is Java under Apache 2.0, which includes a patent licence; Celluler needs a JavaScript implementation on the Holepunch stack.
+
+## 14. Open questions
+
+1. **Projection rule (§4.5):** do Hashgraph's safety and liveness proofs hold when some events' other-parents are outside the membership?
+2. **Global order (§6.2):** prove that causally adjusted timestamps with watermarks give a total order that is final, causal and fair; simulate adversarial clusters skewing their clocks.
+3. **Sync rate vs finality vs journal growth:** choose *f*₀ from C2 measurements.
+4. **Network admission:** which Sybil barrier(s) gate joining (§8.6).
+5. **Randomness:** is a checkpoint hash an adequate beacon for assignment and sortition, or is a dedicated beacon needed?
+6. **Reshuffle rate** vs the stability of clusters.
+7. **Latency-weighted assignment:** does it create exploitable concentration?
+8. **Aggregate signatures** (BLS or similar) for checkpoints.
+9. **Clock skew:** how much can a minority skew consensus times within an honest cluster, and what does that do to cross-cluster fairness?
