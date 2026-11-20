@@ -4,7 +4,7 @@ import _ from 'lodash';
 import { ServiceBroker } from 'moleculer';
 import NucleusService from './services/nucleus.service.js';
 import fs from 'fs';
-import yaml from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -78,7 +78,7 @@ function resolveEnvVars(obj) {
 export async function loadConfig(configPath) {
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
-        const config = yaml.load(configContent);
+        const config = loadYaml(configContent);
         
         // Handle configuration inheritance
         let baseConfig = DEFAULT_CONFIG;
@@ -144,7 +144,7 @@ export function createMoleculerConfig(cellConfig, debug = false) {
         validator: cellConfig.validator,
         errorHandler: cellConfig.errorHandler,
         middlewares: cellConfig.middlewares,
-        replCommands: cellConfig.replCommands,
+        replOptions: cellConfig.replOptions,
         metadata: cellConfig.metadata,
         maxCallLevel: cellConfig.performance?.maxCallLevel,
         heartbeatInterval: cellConfig.performance?.heartbeatInterval,

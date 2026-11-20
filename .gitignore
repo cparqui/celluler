@@ -68,3 +68,9 @@ tmp/**
 **/vendor/**
 **/_site/**
 **/coverage/**
+
+# Agent files
+**/.claude/**
+
+# Obsidian files
+**/.obsidian/**

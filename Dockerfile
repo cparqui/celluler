@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:26-slim
 
 # Install build tools and dependencies for native modules
 RUN apt-get update && apt-get install -y \
