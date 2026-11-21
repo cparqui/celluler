@@ -57,6 +57,24 @@ cell:
 
 ## Configuration Sections
 
+### Nucleus Identity and DHT
+
+These settings go under `cell.config`:
+
+```yaml
+cell:
+  config:
+    storage: file          # `file` persists the identity; `memory` is for tests
+    path: ./data
+    seed: ${CELL_SEED}     # optional: 64 hex characters; generated and persisted if omitted
+    urgentPerMinute: 6     # optional: limit on immediately published public records
+    dht:
+      bootstrap:           # optional: omit to use the public DHT
+        - 127.0.0.1:49737
+```
+
+The root seed controls the cell's identity, so treat it as a secret and prefer an environment variable. An injected seed must match the one already in `path`, or startup fails. Storage holding an old UUID-format journal is rejected at startup and is not migrated. The CLI flag `--dht-bootstrap host:port,host:port` overrides `dht.bootstrap`.
+
 ### Basic Cell Configuration
 - `name`: Human-readable cell name
 - `id`: Unique cell identifier (maps to Moleculer's nodeID)

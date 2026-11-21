@@ -1,8 +1,16 @@
 # NADI Journal, Identity & Messaging — Design Spec
 
-**Status:** Draft v0.3 (2026-11-20) · **Layer:** NADI (L1) · **Supersedes:** the Nucleus/Message sections of `architecture.md` and `services.md` where they conflict. · **Companion:** [NADI Consensus](nadi-consensus.md)
+**Status:** Draft v0.3.1 (2026-11-21) · **Layer:** NADI (L1) · **Supersedes:** the Nucleus/Message sections of `architecture.md` and `services.md` where they conflict. · **Companion:** [NADI Consensus](nadi-consensus.md)
 
 This spec defines the foundation every other Celluler service builds on: how a cell holds keys, what its journal is, how private data is stored and proven, how identity is verified, and how messages move reliably between cells. It defines **syntax, not semantics**: the Nucleus and Message services define formats and guarantees; higher services (Auth, Identity, Consensus, and later PRANA and BUDDHI services) define what their records and messages mean.
+
+### Changes in v0.3.1
+Corrections from implementing the Nucleus identity root:
+- Events carry an explicit **`prev`** hash, so an event hash commits to the event's whole history (§5.2).
+- The **cell ID is the journal's Hypercore key**, which is a hash of a manifest naming the Ed25519 signer, not the signer's raw public key (§3.2).
+- The event **encoding and hash are now defined** (§5.2).
+- Seed injection and `memory` storage are specified (§3.1). Writes and secret-key operations are local to the cell (§5.5).
+- Queued public records can be lost in a crash until the private store exists (§5.3, §13).
 
 ### Changes in v0.3
 - **One record primitive.** The Nucleus has a single type registry and a single `record` call; visibility (`private` or `public`) is chosen per record, not per type.
@@ -39,7 +47,9 @@ A service may depend only on services in its own layer or below. The **Nucleus d
 
 ### 3.1 Root seed
 
-Each cell has one 32-byte (256-bit) **root seed**, persisted by Corestore as its primary key under file storage. In `memory` storage it is lost on restart, so memory mode is for tests only.
+Each cell has one 32-byte (256-bit) **root seed**, persisted by Corestore as its primary key under file storage. In `memory` storage it is lost on restart, so memory mode is for tests only. Corestore 7 has no in-memory backend, so `memory` storage is a temporary directory deleted when the cell stops, and the cell logs a warning that its identity will not persist.
+
+A seed may be injected through the `seed` setting (64 hex characters) for reproducible cells. It must match any seed already in that storage, or startup fails. The Nucleus removes it from its service settings, because Moleculer publishes settings to other nodes.
 
 **Why 256 bits is enough.** The seed is never the weakest point:
 
@@ -55,7 +65,7 @@ All keys are derived deterministically from the seed with distinct context label
 
 | Key | Algorithm | Derivation | Purpose |
 |---|---|---|---|
-| **Journal key** | Ed25519 | Corestore `name: 'journal'` | Signs the journal. **Its public key is the cell ID.** |
+| **Journal key** | Ed25519 | Corestore `name: 'journal'` | Signs the journal. **The journal's Hypercore key is the cell ID.** |
 | Signing key | Ed25519 | `H(seed, "celluler/sign/v1")` | Signs messages, receipts and disclosures |
 | Encryption key | X25519 | `H(seed, "celluler/box/v1")` | Sealed boxes; pairwise link secrets (§9.2) |
 | Swarm key | Ed25519 (Noise) | `H(seed, "celluler/swarm/v1")` → `DHT.keyPair` | Hyperswarm transport authentication |
@@ -67,13 +77,17 @@ All keys are derived deterministically from the seed with distinct context label
 
 Every non-journal public key that others must trust (signing, encryption, swarm) is attested by a public `nucleus/key.add` record before use. Keys are separated by purpose to avoid cross-protocol attacks.
 
+**Cell ID.** A Hypercore's key is the hash of its manifest, and the manifest names the Ed25519 signer. The cell ID is that key (`core.key`), because it is what peers need to find, replicate and verify the journal. To check a raw journal signature, read the signer's public key from the manifest, which the cell ID commits to.
+
 ### 3.3 Why not RSA
 
 RSA-2048 signatures are 256 B vs 64 B for Ed25519, key generation takes ~40 ms vs ~0.05 ms (measured in Node on this codebase's runtime), and nothing in the Holepunch stack uses it. PGP-style operation (sign, then encrypt to the recipient) is Ed25519 signatures plus X25519 sealed boxes (`crypto_box_seal`).
 
 ### 3.4 Rotation and compromise
 
-- Derived keys rotate via public `nucleus/key.revoke` + `nucleus/key.add` records with a new context version (e.g. `sign/v2`).
+- Derived keys rotate via public `nucleus/key.revoke` + `nucleus/key.add` records with a new context version (e.g. `sign/v2`), in one event so a purpose is never left without a key. Versions strictly increase and a public key is never attested twice.
+- Rotation limits the damage of a leaked **derived** key. Every version comes from the same seed, so it does not help if the seed itself is compromised.
+- A revoked signing key no longer verifies. A cell can still open boxes sealed to its retired encryption keys.
 - The journal key cannot rotate within one Hypercore. Root recovery options (open question §13): a Hypercore multi-signer manifest, or a successor journal whose genesis is co-attested by the old key and/or guardians (§10.5).
 - Concurrent use of a stolen journal key forks the journal, which is detected and provable (§7.3).
 
@@ -169,16 +183,33 @@ Public records are permanent and replicated with the journal, so they cannot be 
 Event {
   v:           uint            // format version, = 1
   ts:          uint            // creator's claimed time, ms (consensus assigns the real time)
+  prev:        bytes32 | null  // hash of event i - 1; null only at genesis
   otherParent: Ref | null      // the peer event this event records hearing from
   commits:     bytes32 | null  // Merkle root of private leaves since the previous event (§5.4)
   public:      [Record]        // public records since the previous event (≤ 8 KB in total)
 }
 ```
 
-- **Self-parent is implicit:** event *i*'s self-parent is block *i − 1* of the same journal.
+- **Self-parent is explicit:** `prev` is the hash of block *i − 1*, so a `Ref` to an event commits to its entire history, as Hashgraph requires. It costs 32 B per event.
 - **Signature is Hypercore's:** each append is signed by the journal key, which also signs every public record in the event.
 - **No `kind` field:** what an event means comes from its `otherParent` and the types of its public records.
-- **Encoding:** deterministic (recommended `compact-encoding`; alternative canonical JSON, RFC 8785). Plain `JSON.stringify` is not acceptable.
+- **Encoding:** `compact-encoding`, in the order below. Decoders must reject any block that does not re-encode to identical bytes (non-minimal integers, trailing bytes, unknown flags, invalid UTF-8).
+
+```
+Event:  uint v · uint ts · uint flags · [fixed32 prev] · [Ref otherParent] · [fixed32 commits] · array<Record> public
+        flags: bit 0 = prev, bit 1 = otherParent, bit 2 = commits
+Ref:    fixed32 cell · uint index · fixed32 hash
+Record: string type · uint ts · array<Ref> refs · buffer body
+
+nucleus/genesis body:    string protocol · uint created
+nucleus/key.add body:    string purpose · fixed32 publicKey · uint contextVersion
+nucleus/key.revoke body: fixed32 publicKey · bool hasReason · [string reason]
+```
+
+Other record types have opaque bodies, encoded by the service that owns the type.
+
+- **Event hash** (the value of `Ref.hash`): `BLAKE2b-256("celluler/event/v1" ‖ cell ‖ index as uint64 LE ‖ block)`, over the exact block bytes. Binding the cell and index means one cell's event can never be presented as another's.
+- **Validity:** block 0 holds exactly one `nucleus/genesis` record with no parents or commits. `nucleus/genesis` appears nowhere else, `prev` must match, and an `otherParent` must name another cell.
 
 ### 5.3 Who creates events, and when
 
@@ -192,7 +223,7 @@ Event {
 | Urgent public record | — | the writer asked for immediate publication; rate-limited (6 per minute proposed) |
 | Size limit reached | — | pending public records exceed 8 KB |
 
-Otherwise records wait for the next event; with v1 pings at one per minute, that is at most about a minute.
+Otherwise records wait for the next event; with v1 pings at one per minute, that is at most about a minute. Until the private store exists, waiting records are held in memory: they are flushed on a clean stop but **lost in a crash** (§13). A rate-limited urgent record is queued, not rejected.
 
 **Nucleus public record types:**
 
@@ -235,8 +266,23 @@ nucleus.redact({ seq, reason })   // private records only
 nucleus.getCellId()
 
 // Reserved for the ConsensusService
-nucleus.sync({ peerHead }) → { index }
+nucleus.sync({ peerHead }) → { index, hash, verified }
+
+// Implemented additions
+nucleus.getEvent({ index, cell? })
+nucleus.query({ cell?, type?, hasOtherParent?, from?, to?, limit? }) → { events, nextIndex }
+nucleus.getHead({ cell? }) → Ref
+nucleus.getAttestedKeys({ cell? }) → { sign, box, swarm }
+nucleus.rotateKey({ purpose, reason? })
+nucleus.replicate({ cell, minLength?, timeout? })
+nucleus.verifyJournal({ cell? })
+nucleus.sign({ message }) · nucleus.verify({ message, signature, cell? })
+nucleus.seal({ message, cell }) · nucleus.unseal({ ciphertext })
 ```
+
+`registerType` takes `receipt: true` for types that may set `parent`. `query` scans journal events; a query over the private store will arrive with it. `verified` says whether a `Ref` could be checked against a local copy of the peer's journal; a `Ref` that contradicts the local copy is rejected.
+
+**Access.** `registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `seal` and `unseal` are Moleculer `protected` actions: callable only within the cell's own node, not through the API gateway or from other nodes on the transporter.
 
 ## 6. What is public, what is private
 
@@ -465,7 +511,7 @@ Custodians and guardians are normally chosen from trusted edges; reciprocal stor
 ## 11. Testing plan
 
 ### 11.1 Infrastructure
-- `hyperdht/testnet` for an in-process DHT; no test touches the public DHT (the current suite takes ~3 min, likely from public DHT bootstrap).
+- `hyperdht/testnet` for an in-process DHT. Jest maps `hyperdht` to a guard that throws unless every bootstrap node is loopback, so no test can reach the public DHT.
 - Injected seeds for reproducible cell IDs.
 
 ### 11.2 Scenarios
@@ -484,7 +530,7 @@ Journal growth vs sync rate; private store write throughput; backup encode/uploa
 | Current (`main`, Jun 2025) | Change |
 |---|---|
 | RSA-2048 keypair generated in memory on each start | Remove; derive keys from root seed (§3) |
-| `generateCellUUID` in block 0 | Cell ID = journal public key; block 0 = `genesis` event |
+| `generateCellUUID` in block 0 | Cell ID = journal Hypercore key; block 0 = `genesis` event |
 | `write` stringifies JSON into a `valueEncoding: 'json'` core (double-encoded) | Only the Nucleus appends events; services call `record` |
 | Any caller may write arbitrary data to any core | Writes only through the Nucleus with registered types |
 | `memory` storage default | Keep for tests; warn that identity is not persistent |
@@ -494,8 +540,8 @@ Journal growth vs sync rate; private store write throughput; backup encode/uploa
 
 ## 13. Open questions
 
-1. **Encoding:** compact-encoding (recommended) vs canonical JSON.
-2. **Public name at genesis:** allowed, or only via `profile` later?
+1. ~~**Encoding**~~ Resolved: compact-encoding (§5.2).
+2. ~~**Public name at genesis**~~ Resolved: no name at genesis; use `nucleus/profile`.
 3. **Sync rate vs journal growth:** 1/min costs ~131 MB/year per cell; is 1/5 min (~26 MB) enough for consensus latency?
 4. **Phones:** should mobile cells delegate journal and storage duties to a home node?
 5. **Root key recovery:** multi-signer manifest vs successor journal.
@@ -508,3 +554,6 @@ Journal growth vs sync rate; private store write throughput; backup encode/uploa
 12. **Public record limits:** 1 KB inline per record and 8 KB per event proposed; larger bodies referenced by hash.
 13. **Urgent events:** default rate limit (6 per minute proposed) and who may use the flag.
 14. **Post-quantum migration:** when to add hybrid PQ keys, and how a journal whose own key is Ed25519 survives a break of Ed25519.
+15. **Durable pending records:** queued public records should be persisted (likely in the private store) so a crash cannot lose them.
+16. **Timestamp rule:** the Nucleus writes strictly increasing `ts`, but verifiers do not yet enforce it. Should Hashgraph require it?
+17. **Type ownership:** `owner` is recorded but not checked against the calling service; all callers are currently local.
