@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { startCell, loadConfig, DEFAULT_CONFIG } from './index.js';
+import { startCell, loadConfig, redactConfig, DEFAULT_CONFIG } from './index.js';
 import _ from 'lodash';
 
 program
@@ -20,6 +20,7 @@ program
     .option('-l, --log-level <level>', 'Global log level (overrides config)')
     .option('-t, --transporter <type>', 'Transporter type (overrides config)')
     .option('-p, --port <port>', 'Transporter port (overrides config)')
+    .option('--dht-bootstrap <nodes>', 'Comma-separated host:port DHT bootstrap nodes (default: public DHT)')
     .action(async (options) => {
         try {
             console.log('Starting cell with options:', options);
@@ -65,6 +66,13 @@ program
             if (options.transporter) config.cell.transporter.type = options.transporter;
             if (options.port) config.cell.transporter.options.port = parseInt(options.port, 10);
 
+            if (options.dhtBootstrap) {
+                config.cell.config = {
+                    ...config.cell.config,
+                    dht: { bootstrap: options.dhtBootstrap.split(',').map(node => node.trim()) }
+                };
+            }
+
             // Handle debug logging
             if (options.debug) {
                 let logLevel = "debug";
@@ -89,7 +97,7 @@ program
             }
 
             if (options.debug) {
-                console.log('Final configuration:', JSON.stringify(config, null, 2));
+                console.log('Final configuration:', JSON.stringify({ ...config, cell: redactConfig(config.cell) }, null, 2));
             }
             console.log('Starting cell...');
 

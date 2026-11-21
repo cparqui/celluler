@@ -31,6 +31,16 @@ export function createJournalState(cell) {
     };
 }
 
+/** A copy that can be advanced without affecting the original. */
+export function cloneJournalState(state) {
+    return {
+        ...state,
+        keys: { ...state.keys },
+        highestVersion: { ...state.highestVersion },
+        usedKeys: new Set(state.usedKeys)
+    };
+}
+
 function checkParents(state, event, index) {
     if (index === 0) {
         if (event.prev || event.otherParent || event.commits) {

@@ -33,14 +33,10 @@ export const DEFAULT_CONFIG = {
                 udpPeriod: 30
             }
         },
-        services: {
-            enabled: ['nucleus'],
-            config: {
-                nucleus: {
-                    storage: 'memory',
-                    encryption: true
-                }
-            }
+        services: ['nucleus'],
+        config: {
+            storage: 'memory',
+            encryption: true
         },
         logger: {
             type: 'Console',
@@ -54,6 +50,12 @@ export const DEFAULT_CONFIG = {
         }
     }
 };
+
+/** A copy safe to log: the root seed is never printed. */
+export function redactConfig(cellConfig) {
+    if (!cellConfig?.config?.seed) return cellConfig;
+    return { ...cellConfig, config: { ...cellConfig.config, seed: '[redacted]' } };
+}
 
 function resolveEnvVars(obj) {
     if (typeof obj === 'string') {
@@ -128,7 +130,7 @@ export async function loadConfig(configPath) {
 
 export function createMoleculerConfig(cellConfig, debug = false) {
     if (debug) {
-        console.log('Creating Moleculer config from cell config:', JSON.stringify(cellConfig, null, 2));
+        console.log('Creating Moleculer config from cell config:', JSON.stringify(redactConfig(cellConfig), null, 2));
     }
 
     const moleculerConfig = {
