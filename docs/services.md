@@ -134,21 +134,19 @@ The cell's memory manager: owns the root seed and derived keys, the journal (the
 ```javascript
 // Interface sketch (see spec §6.1)
 
-// Called once by each service at startup
-await ctx.call("nucleus.registerRecordType", {
-    type: "msg/received",            // "<service>/<record>"
-    owner: "message",
-});
+// Called once by each service at startup; visibility is not part of the type
+await ctx.call("nucleus.registerType", { type: "msg/received", owner: "message" });
 
-// Public transaction types appear in the journal as `tx` events
-await ctx.call("nucleus.registerTxType", { type: "prana/vote", owner: "prana-governance" });
-
-// Record: stores the full record privately, commits its salted hash
+// Private record: stored in the private store, salted hash committed in the next event
 const { seq, leaf } = await ctx.call("nucleus.record", {
     type: "msg/received",
     body,                            // encoded by the owning service
-    refs: []                         // optional links to other cells' commitments
+    refs: [],                        // optional links to other cells' records
+    visibility: "private"
 });
+
+// Public record: written inline into the next event (urgent = publish now, rate-limited)
+await ctx.call("nucleus.record", { type: "nucleus/profile", body, visibility: "public" });
 
 // Query the private store by type
 await ctx.call("nucleus.query", { type: "msg/received", limit: 100 });
@@ -163,7 +161,7 @@ await ctx.call("nucleus.redact", { seq, reason });
 await ctx.call("nucleus.getCellId");      // public journal key, hex
 ```
 
-Services never write cores directly; the journal is append-only, so there is no truncate operation.
+Services never write cores or create events directly: only the Nucleus appends events (on consensus syncs, revealed receipts and urgent public records). The journal is append-only, so there is no truncate operation.
 
 ### 2. MessageService
 
@@ -182,7 +180,10 @@ await ctx.call("message.link", { to: cellId });
 const { id, index } = await ctx.call("message.send", { to: cellId, protocol: "auth/1", body });
 
 // Multicast: appended to this cell's topic core
-await ctx.call("message.publish", { topic: "coop/la-paz", protocol: "prana-vote/1", body });
+await ctx.call("message.send", { to: { topic: "coop/la-paz" }, protocol: "coop-chat/1", body });
+
+// Public message ("transaction"): inline in this cell's journal, ordered by consensus
+await ctx.call("message.send", { to: "public", protocol: "prana-vote/1", body });
 
 // Delivery state from the recipient's receipts
 await ctx.call("message.status", { id });   // "sent" | "delivered" | "processed"

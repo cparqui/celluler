@@ -47,7 +47,7 @@ A cell is implemented as a cluster of microservices. The NucleusService acts as 
 1. **NucleusService** (NADI)
    - The cell's memory manager; depends on no other service
    - Holds the root seed and derives all cell keys; the journal's public key is the cell ID
-   - Owns the journal, which is the cell's event chain: every block is an event (genesis, syncs, key changes, public transactions, revealed messages)
+   - Owns the journal, which is the cell's event chain: every block is an event created by the Nucleus, carrying public records (keys, public messages such as votes, revealed receipts) and a commitment root over private records
    - Keeps full records in an encrypted, mutable private store and commits their hashes in each event's commitment root
    - Never deletes; produces proofs about any committed record (redaction is an explicit, recorded exception)
 
@@ -90,7 +90,7 @@ Services within a cell coordinate through:
 ### Data Storage
 
 Each cell has two kinds of storage, both managed by the NucleusService:
-- **Journal**: one replicated Hypercore per cell holding its events (genesis, syncs, keys, public transactions, revealed messages), each with a commitment root over private records. Permanent and public.
+- **Journal**: one replicated Hypercore per cell holding its events (genesis, syncs, public records such as keys and public messages, revealed receipts), each with a commitment root over private records. Permanent and public.
 - **Private store**: an encrypted, mutable local store holding full records, message bodies and key material. Backed up as encrypted, erasure-coded shards across custodians.
 - **Link and topic cores**: sender-owned cores that carry messages to counterparties and subscribers.
 

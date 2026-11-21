@@ -60,14 +60,15 @@ Prerequisite for any other service registering journal records or message protoc
 - [ ] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
 - [ ] Cell ID = journal public key; replace generated UUID with a `genesis` event
 - [ ] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
-- [ ] `key.add` / `key.revoke` events
+- [ ] Public `nucleus/key.add` / `nucleus/key.revoke` records
 
 ### 2. Nucleus as memory manager
-- [ ] Journal as event chain: deterministic event format and kinds (decide compact-encoding vs canonical JSON)
-- [ ] Record and transaction type registration
+- [ ] Journal as event chain: deterministic event format (decide compact-encoding vs canonical JSON)
+- [ ] One type registry; `record` with per-record visibility (private leaf or public inline)
+- [ ] Event creation owned by the Nucleus: syncs, revealed receipts, rate-limited urgent records
 - [ ] Encrypted, mutable private store and type index
 - [ ] Salted leaf commitments; commitment root in each event
-- [ ] `record`, `emit`, `query`, `prove` and `redact` actions; proof verification
+- [ ] `record`, `query`, `prove` and `redact` actions; proof verification
 - [ ] Replace raw `write`; fix double-encoded JSON
 
 ### 3. Reliable MessageService
@@ -81,7 +82,7 @@ Prerequisite for any other service registering journal records or message protoc
 
 ### 4. Edges and proofs
 - [ ] Private edge records from real traffic (`identity/edge`)
-- [ ] Revealed `message` events and co-signed `edge.reveal` events
+- [ ] Revealed receipts and co-signed `nucleus/edge.reveal` records
 - [ ] T1 possession and T4 selective-claim proofs
 
 ### 5. Private store backup
