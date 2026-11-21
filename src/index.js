@@ -6,9 +6,6 @@ import NucleusService from './services/nucleus.service.js';
 import fs from 'fs';
 import { load as loadYaml } from 'js-yaml';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DEFAULT_LOG_LEVELS = {
     METRICS: 'warn',

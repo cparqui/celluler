@@ -260,6 +260,7 @@ export default class ApiService extends Service {
             name: "Celluler API Gateway",
             version: process.env.npm_package_version || "0.1.0",
             description: "REST API gateway for Celluler distributed services",
+            cellId: this.cellId ?? null,
             timestamp: new Date().toISOString(),
             documentation: "/api/endpoints",
             features: [
@@ -306,10 +307,12 @@ export default class ApiService extends Service {
     }
 
     async onNucleusStarted(ctx) {
+        this.cellId = ctx.params?.cellId ?? null;
         this.logger.info("Nucleus service started, API Gateway is ready");
     }
 
     async onNucleusStopped(ctx) {
+        this.cellId = null;
         this.logger.info("Nucleus service stopped, API Gateway is shutting down");
     }
 } 

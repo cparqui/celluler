@@ -9,6 +9,16 @@ module.exports = {
     testTimeout: 30000,
     forceExit: true,
     collectCoverage: true,
+    // The CLI entry point and the MessageService (being rewritten separately) are excluded.
+    collectCoverageFrom: ['src/**/*.js', '!src/cli.js', '!src/services/message.service.js'],
+    coverageThreshold: {
+        global: {
+            branches: 80,
+            functions: 80,
+            lines: 80,
+            statements: 80
+        }
+    },
     coverageDirectory: 'coverage',
     coverageReporters: ['text', 'lcov', 'html'],
     transform: {
