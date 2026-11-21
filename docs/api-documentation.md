@@ -242,7 +242,7 @@ Replay a journal and check its signed head. Optional `cell`.
 ```
 
 ##### Local-only actions
-`registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `seal` and `unseal` are not available over REST or from other nodes. Services in the same node call them through the broker (spec §5.5).
+`registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `encrypt` and `decrypt` are not available over REST or from other nodes. Services in the same node call them through the broker (spec §5.5).
 
 #### Message Service Endpoints
 

@@ -60,16 +60,16 @@ describe('Nucleus key rotation', () => {
         expect(await cell.call('verify', { message, signature: newSignature })).toBe(true);
     });
 
-    it('can still open boxes sealed to a retired encryption key', async () => {
-        const box = await cell.call('seal', { message: 'before', cell: cell.cellId });
+    it('can still decrypt messages encrypted to a retired key', async () => {
+        const box = await cell.call('encrypt', { message: 'before', cell: cell.cellId });
         await cell.call('rotateKey', { purpose: 'box' });
-        expect(b4a.toString(await cell.call('unseal', { ciphertext: box }))).toBe('before');
-        const newBox = await cell.call('seal', { message: 'after', cell: cell.cellId });
-        expect(b4a.toString(await cell.call('unseal', { ciphertext: newBox }))).toBe('after');
+        expect(b4a.toString(await cell.call('decrypt', { ciphertext: box }))).toBe('before');
+        const newBox = await cell.call('encrypt', { message: 'after', cell: cell.cellId });
+        expect(b4a.toString(await cell.call('decrypt', { ciphertext: newBox }))).toBe('after');
     });
 
-    it('rejects a box it cannot open', async () => {
-        await expect(cell.call('unseal', { ciphertext: b4a.alloc(64) })).rejects.toThrow('Could not open');
+    it('rejects a ciphertext it cannot decrypt', async () => {
+        await expect(cell.call('decrypt', { ciphertext: b4a.alloc(64) })).rejects.toThrow('Could not decrypt');
     });
 
     it('moves the swarm to the new key and keeps its topics', async () => {

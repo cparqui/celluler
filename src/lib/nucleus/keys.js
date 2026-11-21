@@ -89,8 +89,11 @@ export function verifyDetached(message, signature, publicKey) {
   return sodium.crypto_sign_verify_detached(signature, message, publicKey);
 }
 
-/** Encrypts to an X25519 public key; the sender stays anonymous. */
-export function seal(message, publicKey) {
+/**
+ * Encrypts to an X25519 public key using a libsodium sealed box. The sender is
+ * anonymous, so sign the message as well if the recipient must know who sent it.
+ */
+export function encrypt(message, publicKey) {
   if (
     !b4a.isBuffer(publicKey) ||
     publicKey.byteLength !== sodium.crypto_box_PUBLICKEYBYTES
@@ -104,8 +107,8 @@ export function seal(message, publicKey) {
   return ciphertext;
 }
 
-/** Returns the plaintext, or null if the box cannot be opened with this key pair. */
-export function openSeal(ciphertext, keyPair) {
+/** Returns the plaintext, or null if this key pair cannot decrypt the ciphertext. */
+export function decrypt(ciphertext, keyPair) {
   if (
     !b4a.isBuffer(ciphertext) ||
     ciphertext.byteLength < sodium.crypto_box_SEALBYTES

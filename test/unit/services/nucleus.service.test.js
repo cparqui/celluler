@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ServiceBroker } from 'moleculer';
-import Corestore from 'corestore';
 import { RECORD_TYPES } from '../../../src/lib/nucleus/events.js';
 import NucleusService from '../../../src/services/nucleus.service.js';
 import { fixedClock, startCell, testSeed } from '../../helpers/cell.js';
@@ -228,7 +227,7 @@ describe('NucleusService', () => {
     describe('access control', () => {
         it('marks write and secret-key actions as local-only', () => {
             const actions = cell.service.schema.actions;
-            for (const name of ['registerType', 'record', 'sync', 'replicate', 'sign', 'verify', 'seal', 'unseal']) {
+            for (const name of ['registerType', 'record', 'sync', 'replicate', 'sign', 'verify', 'encrypt', 'decrypt']) {
                 expect(actions[name].visibility).toBe('protected');
             }
         });

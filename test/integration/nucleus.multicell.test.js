@@ -103,15 +103,15 @@ describe('multi-cell journals', () => {
             expect(await a.call('verify', { message: 'other', signature, cell: b.cellId })).toBe(false);
         });
 
-        it('seals to a peer, and only the peer can open it', async () => {
+        it('encrypts to a peer, and only the peer can decrypt it', async () => {
             await a.call('replicate', { cell: b.cellId, minLength: 2 });
-            const ciphertext = await a.call('seal', { message: 'secret', cell: b.cellId });
-            expect(b4a.toString(await b.call('unseal', { ciphertext }))).toBe('secret');
-            await expect(a.call('unseal', { ciphertext })).rejects.toThrow('Could not open');
+            const ciphertext = await a.call('encrypt', { message: 'secret', cell: b.cellId });
+            expect(b4a.toString(await b.call('decrypt', { ciphertext }))).toBe('secret');
+            await expect(a.call('decrypt', { ciphertext })).rejects.toThrow('Could not decrypt');
         });
 
         it('requires a replicated journal for peer crypto', async () => {
-            await expect(a.call('seal', { message: 'x', cell: b.cellId })).rejects.toThrow('not replicated');
+            await expect(a.call('encrypt', { message: 'x', cell: b.cellId })).rejects.toThrow('not replicated');
             await expect(a.call('verify', { message: 'x', signature: b4a.alloc(64), cell: b.cellId }))
                 .rejects.toThrow('not replicated');
         });
@@ -190,7 +190,7 @@ describe('multi-cell journals', () => {
             await remote.waitForServices('nucleus');
 
             expect(await remote.call('nucleus.getCellId')).toMatch(/^[0-9a-f]{64}$/);
-            for (const action of ['record', 'sign', 'unseal', 'rotateKey', 'sync', 'registerType']) {
+            for (const action of ['record', 'sign', 'decrypt', 'rotateKey', 'sync', 'registerType']) {
                 await expect(remote.call(`nucleus.${action}`, {})).rejects.toMatchObject({ name: 'ServiceNotFoundError' });
             }
             await remote.stop();

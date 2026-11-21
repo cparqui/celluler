@@ -19,8 +19,8 @@ import {
 import {
   ATTESTED_PURPOSES,
   deriveKeyPair,
-  openSeal,
-  seal,
+  decrypt,
+  encrypt,
   signDetached,
   verifyDetached,
 } from "../lib/nucleus/keys.js";
@@ -236,15 +236,15 @@ export default class NucleusService extends BaseService {
           params: { message: "any", signature: "any", cell: optionalCell },
           handler: this.verify,
         },
-        seal: {
+        encrypt: {
           ...LOCAL_ONLY,
           params: { message: "any", cell: "string" },
-          handler: this.seal,
+          handler: this.encrypt,
         },
-        unseal: {
+        decrypt: {
           ...LOCAL_ONLY,
           params: { ciphertext: "any" },
-          handler: this.unseal,
+          handler: this.decrypt,
         },
 
         // Named non-journal cores
@@ -711,8 +711,8 @@ export default class NucleusService extends BaseService {
     );
   }
 
-  /** Seals a message to a cell's currently attested encryption key. */
-  async seal(ctx) {
+  /** Encrypts a message to a cell's currently attested encryption key. */
+  async encrypt(ctx) {
     const { message, cell } = ctx.params;
     const key = (await this.#stateOf(cell)).keys.box;
     if (!key)
@@ -720,14 +720,14 @@ export default class NucleusService extends BaseService {
         `Cell ${cell} has no attested encryption key`,
         "NO_ATTESTED_KEY",
       );
-    return seal(
+    return encrypt(
       parseInput(() => toBytes(message, "message")),
       key.publicKey,
     );
   }
 
-  /** Tries the current key, then retired ones, so boxes sealed before a rotation stay readable. */
-  unseal(ctx) {
+  /** Tries the current key, then retired ones, so messages encrypted before a rotation stay readable. */
+  decrypt(ctx) {
     const current = this.#currentKeyPair("box");
     for (
       let version = this.#journal.state.highestVersion.box;
@@ -738,10 +738,10 @@ export default class NucleusService extends BaseService {
         version === this.#journal.state.keys.box.contextVersion
           ? current
           : deriveKeyPair(this.#seed, "box", version);
-      const plaintext = openSeal(ctx.params.ciphertext, keyPair);
+      const plaintext = decrypt(ctx.params.ciphertext, keyPair);
       if (plaintext) return plaintext;
     }
-    throw reject("Could not open sealed box", "UNSEAL_FAILED");
+    throw reject("Could not decrypt message", "DECRYPT_FAILED");
   }
 
   // Named non-journal cores

@@ -4,9 +4,9 @@ import {
     contextLabel,
     deriveKey,
     deriveKeyPair,
-    openSeal,
+    decrypt,
     parseSeed,
-    seal,
+    encrypt,
     signDetached,
     verifyDetached
 } from '../../../../src/lib/nucleus/keys.js';
@@ -84,25 +84,25 @@ describe('keys', () => {
         });
     });
 
-    describe('sealed boxes', () => {
+    describe('encryption', () => {
         const keyPair = deriveKeyPair(seed, 'box');
         const message = b4a.from('secret');
 
         it('round-trips', () => {
-            expect(b4a.toString(openSeal(seal(message, keyPair.publicKey), keyPair))).toBe('secret');
+            expect(b4a.toString(decrypt(encrypt(message, keyPair.publicKey), keyPair))).toBe('secret');
         });
 
         it('returns null for the wrong key, tampering, or short input', () => {
-            const box = seal(message, keyPair.publicKey);
-            expect(openSeal(box, deriveKeyPair(seed, 'box', 2))).toBeNull();
+            const box = encrypt(message, keyPair.publicKey);
+            expect(decrypt(box, deriveKeyPair(seed, 'box', 2))).toBeNull();
             const tampered = b4a.from(box);
             tampered[0] ^= 1;
-            expect(openSeal(tampered, keyPair)).toBeNull();
-            expect(openSeal(b4a.alloc(3), keyPair)).toBeNull();
+            expect(decrypt(tampered, keyPair)).toBeNull();
+            expect(decrypt(b4a.alloc(3), keyPair)).toBeNull();
         });
 
         it('rejects an invalid recipient key', () => {
-            expect(() => seal(message, b4a.alloc(3))).toThrow('Invalid encryption public key');
+            expect(() => encrypt(message, b4a.alloc(3))).toThrow('Invalid encryption public key');
         });
     });
 });

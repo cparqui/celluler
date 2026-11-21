@@ -87,7 +87,7 @@ RSA-2048 signatures are 256 B vs 64 B for Ed25519, key generation takes ~40 ms v
 
 - Derived keys rotate via public `nucleus/key.revoke` + `nucleus/key.add` records with a new context version (e.g. `sign/v2`), in one event so a purpose is never left without a key. Versions strictly increase and a public key is never attested twice.
 - Rotation limits the damage of a leaked **derived** key. Every version comes from the same seed, so it does not help if the seed itself is compromised.
-- A revoked signing key no longer verifies. A cell can still open boxes sealed to its retired encryption keys.
+- A revoked signing key no longer verifies. A cell can still decrypt messages encrypted to its retired encryption keys.
 - The journal key cannot rotate within one Hypercore. Root recovery options (open question §13): a Hypercore multi-signer manifest, or a successor journal whose genesis is co-attested by the old key and/or guardians (§10.5).
 - Concurrent use of a stolen journal key forks the journal, which is detected and provable (§7.3).
 
@@ -277,12 +277,14 @@ nucleus.rotateKey({ purpose, reason? })
 nucleus.replicate({ cell, minLength?, timeout? })
 nucleus.verifyJournal({ cell? })
 nucleus.sign({ message }) · nucleus.verify({ message, signature, cell? })
-nucleus.seal({ message, cell }) · nucleus.unseal({ ciphertext })
+nucleus.encrypt({ message, cell }) · nucleus.decrypt({ ciphertext })
 ```
 
 `registerType` takes `receipt: true` for types that may set `parent`. `query` scans journal events; a query over the private store will arrive with it. `verified` says whether a `Ref` could be checked against a local copy of the peer's journal; a `Ref` that contradicts the local copy is rejected.
 
-**Access.** `registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `seal` and `unseal` are Moleculer `protected` actions: callable only within the cell's own node, not through the API gateway or from other nodes on the transporter.
+**Access.** `registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `encrypt` and `decrypt` are Moleculer `protected` actions: callable only within the cell's own node, not through the API gateway or from other nodes on the transporter.
+
+`encrypt` uses a libsodium sealed box to the recipient's attested X25519 key. The sender is anonymous, so a message whose sender matters must also be signed.
 
 ## 6. What is public, what is private
 
