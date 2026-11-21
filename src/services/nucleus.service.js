@@ -129,6 +129,14 @@ export default class NucleusService extends BaseService {
                     handler: this.record
                 },
                 sync: { ...LOCAL_ONLY, params: { peerHead: refParam }, handler: this.sync },
+                rotateKey: {
+                    ...LOCAL_ONLY,
+                    params: {
+                        purpose: { type: 'enum', values: ATTESTED_PURPOSES },
+                        reason: { type: 'string', optional: true, max: 256 }
+                    },
+                    handler: this.rotateKey
+                },
 
                 // Peer journals
                 replicate: {
@@ -375,6 +383,38 @@ export default class NucleusService extends BaseService {
         return { index: event.index, hash: toHex(event.hash), verified };
     }
 
+    /**
+     * Revokes a purpose's key and attests its successor in one event. This limits
+     * a leaked derived key; it does not help if the root seed itself is compromised.
+     */
+    async rotateKey(ctx) {
+        const journal = this.#requireJournal();
+        const { purpose, reason = null } = ctx.params;
+        const current = journal.state.keys[purpose];
+        if (!current) throw reject(`No attested ${purpose} key`, 'NO_ATTESTED_KEY');
+
+        const contextVersion = journal.state.highestVersion[purpose] + 1;
+        const { publicKey } = deriveKeyPair(this.#seed, purpose, contextVersion);
+        const ts = journal.now();
+        const records = [
+            {
+                type: RECORD_TYPES.KEY_REVOKE,
+                ts,
+                refs: [],
+                body: encodeBody(RECORD_TYPES.KEY_REVOKE, { publicKey: current.publicKey, reason })
+            },
+            {
+                type: RECORD_TYPES.KEY_ADD,
+                ts,
+                refs: [],
+                body: encodeBody(RECORD_TYPES.KEY_ADD, { purpose, publicKey, contextVersion })
+            }
+        ];
+        const { event } = await journal.write(records, { immediate: true });
+        if (purpose === 'swarm') await this.#replaceSwarm();
+        return { purpose, publicKey: toHex(publicKey), contextVersion, index: event.index, hash: toHex(event.hash) };
+    }
+
     // Peer journals
 
     /** Downloads and verifies a peer's journal, waiting for at least `minLength` blocks. */
@@ -435,10 +475,15 @@ export default class NucleusService extends BaseService {
         return seal(parseInput(() => toBytes(message, 'message')), key.publicKey);
     }
 
+    /** Tries the current key, then retired ones, so boxes sealed before a rotation stay readable. */
     unseal(ctx) {
-        const plaintext = openSeal(ctx.params.ciphertext, this.#currentKeyPair('box'));
-        if (!plaintext) throw reject('Could not open sealed box', 'UNSEAL_FAILED');
-        return plaintext;
+        const current = this.#currentKeyPair('box');
+        for (let version = this.#journal.state.highestVersion.box; version >= 1; version--) {
+            const keyPair = version === this.#journal.state.keys.box.contextVersion ? current : deriveKeyPair(this.#seed, 'box', version);
+            const plaintext = openSeal(ctx.params.ciphertext, keyPair);
+            if (plaintext) return plaintext;
+        }
+        throw reject('Could not open sealed box', 'UNSEAL_FAILED');
     }
 
     // Named non-journal cores
@@ -523,6 +568,16 @@ export default class NucleusService extends BaseService {
         });
         swarm.on('error', (err) => this.logger.error('Hyperswarm error:', err));
         return swarm;
+    }
+
+    /** Moves to a swarm using the newly attested key and rejoins every topic. */
+    async #replaceSwarm() {
+        const previous = this.swarm;
+        const topics = [...this.#topics.values()].map(({ discoveryKey }) => discoveryKey);
+        this.#topics.clear();
+        this.swarm = this.#createSwarm();
+        topics.forEach((discoveryKey) => this.#joinTopic(discoveryKey));
+        await previous.destroy();
     }
 
     #joinTopic(discoveryKey) {
