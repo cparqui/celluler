@@ -1,12 +1,12 @@
 import BaseService from './base.service.js'
 import b4a from 'b4a'
-import Corestore from 'corestore'
 import Hyperswarm from 'hyperswarm'
-import RAM from 'random-access-memory'
 import _ from "lodash";
 import { Service } from "moleculer";
 import { getCoreInfo, generateCellUUID, generateKeyPair } from '../lib/core.utils.js';
 import crypto from 'crypto';
+import { deriveKeyPair } from '../lib/nucleus/keys.js';
+import { openCellStore, removeEphemeral } from '../lib/nucleus/store.js';
 
 // Parameter validation objects
 const BindParams = {
@@ -37,12 +37,21 @@ const WriteParams = {
 };
 
 export default class NucleusService extends BaseService {
+    // The seed never enters `settings` or `cellConfig`: Moleculer publishes
+    // service settings to other nodes and through $node.services.
+    #injectedSeed;
+    #seed = null;
+    #ephemeralDirectory = null;
+
     constructor(broker, cellConfig) {
-        super(broker, cellConfig);
-        
+        const { seed, ...nucleusSettings } = cellConfig.config ?? {};
+        const safeCellConfig = { ...cellConfig, config: nucleusSettings };
+        super(broker, safeCellConfig);
+        this.#injectedSeed = seed;
+
         this.parseServiceSchema({
             name: "nucleus",
-            settings: cellConfig.config,
+            settings: nucleusSettings,
             dependencies: [],
             actions: {
                 bind: {
@@ -114,20 +123,13 @@ export default class NucleusService extends BaseService {
         this.logger.info("Nucleus service started");
         
         try {
-            // Initialize corestore based on storage type
-            this.logger.debug("Initializing Corestore with storage type:", this.settings.storage);
-            if (this.settings.storage === 'file') {
-                if (!this.settings.path) {
-                    throw new Error('Path must be specified when using file storage');
-                }
-                this.logger.debug("Initializing Corestore with file storage at:", this.settings.path);
-                this.store = new Corestore(this.settings.path);
-            } else if (this.settings.storage === 'memory') {
-                this.logger.debug("Initializing Corestore with memory storage");
-                this.store = new Corestore((filename) => new RAM());
-            } else {
-                throw new Error(`Invalid storage type: ${this.settings.storage}`);
+            if (this.settings.storage === 'memory') {
+                this.logger.warn("Memory storage: this cell's identity will not persist across restarts");
             }
+            const opened = await openCellStore({ ...this.settings, seed: this.#injectedSeed });
+            this.store = opened.store;
+            this.#seed = opened.seed;
+            this.#ephemeralDirectory = opened.ephemeralDirectory;
             this.store.on('close', () => this.logger.info("Corestore closed."));
             await this.store.ready().catch((err) => this.logger.error("Failed to initialize Corestore:", err));
             this.logger.info("Corestore initialized.");
@@ -136,7 +138,10 @@ export default class NucleusService extends BaseService {
             // Initialize hyperswarm
             this.logger.info("Initializing Hyperswarm...");
             // No bootstrap means Hyperswarm's default, the public DHT.
-            this.swarm = new Hyperswarm(this.settings.dht?.bootstrap ? { bootstrap: this.settings.dht.bootstrap } : {});
+            this.swarm = new Hyperswarm({
+                keyPair: deriveKeyPair(this.#seed, 'swarm'),
+                ...(this.settings.dht?.bootstrap ? { bootstrap: this.settings.dht.bootstrap } : {})
+            });
             this.swarm.on('connection', (conn) => {
                 this.logger.debug("New Hyperswarm connection established");
                 if (this.store) {
@@ -190,11 +195,9 @@ export default class NucleusService extends BaseService {
                 publicKey: this.publicKey
             });    
         } catch (err) {
-            this.logger.error("Failed to initialize Corestore:", err);
-            this.logger.warn("Service will start without storage capabilities");
-            this.store = null;
-            this.cores = {};
-            this.journal = null;
+            this.logger.error("Failed to start Nucleus:", err);
+            await this.releaseResources();
+            throw err;
         }
     }
 
@@ -207,6 +210,10 @@ export default class NucleusService extends BaseService {
             publicKey: this.publicKey
         });
 
+        await this.releaseResources();
+    }
+
+    async releaseResources() {
         // Close all cores
         if (this.cores) {
             for (const [name, core] of Object.entries(this.cores)) {
@@ -252,6 +259,10 @@ export default class NucleusService extends BaseService {
             }
             this.store = null;
         }
+
+        await removeEphemeral(this.#ephemeralDirectory);
+        this.#ephemeralDirectory = null;
+        this.#seed = null;
     }
 
     // Action handlers
