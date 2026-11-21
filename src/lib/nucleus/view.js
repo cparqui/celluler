@@ -1,6 +1,7 @@
 // Converts between internal events and the JSON-safe, hex-encoded API shape.
 import b4a from "b4a";
-import { assertRef, decodeBody } from "./events.js";
+import { assertRef } from "./events.js";
+import { decodeBody } from "./records/index.js";
 
 const HEX_32 = /^[0-9a-f]{64}$/;
 

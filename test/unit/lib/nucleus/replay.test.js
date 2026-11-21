@@ -1,7 +1,8 @@
 import b4a from 'b4a';
-import { PROTOCOL, RECORD_TYPES as T, encodeBody, encodeEvent, hashEvent } from '../../../../src/lib/nucleus/events.js';
+import { JournalError } from '../../../../src/lib/nucleus/errors.js';
+import { encodeEvent, hashEvent } from '../../../../src/lib/nucleus/events.js';
+import { PROTOCOL, RECORD_TYPES as T, encodeBody } from '../../../../src/lib/nucleus/records/index.js';
 import {
-    JournalError,
     applyBlock,
     createJournalState,
     replayJournal

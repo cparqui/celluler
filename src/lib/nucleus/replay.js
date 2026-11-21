@@ -1,28 +1,13 @@
 // Replays journal blocks into verified state. Pure: no I/O, no service state.
 //
-// Rules enforced for every block:
-//   - canonical encoding; `prev` equals the hash of the previous event
-//   - block 0 is exactly one nucleus/genesis record, with no parents or commits
-//   - nucleus/genesis appears nowhere else; an otherParent never names this cell
-//   - key.add needs no active key for its purpose, a higher context version, and a
-//     public key never attested before; key.revoke must name an active key
+// This file enforces the rules common to every block: canonical encoding, the
+// `prev` chain, the shape of block 0, and otherParent never naming this cell.
+// Rules for a specific record type live in its class under ./records.
 import b4a from "b4a";
+import { JournalError } from "./errors.js";
+import { decodeEvent, hashEvent } from "./events.js";
 import { ATTESTED_PURPOSES } from "./keys.js";
-import {
-  PROTOCOL,
-  RECORD_TYPES,
-  decodeBody,
-  decodeEvent,
-  hashEvent,
-} from "./events.js";
-
-export class JournalError extends Error {
-  constructor(message, index = null) {
-    super(index === null ? message : `Journal event ${index}: ${message}`);
-    this.name = "JournalError";
-    this.index = index;
-  }
-}
+import { RECORD_TYPES, nucleusRecords } from "./records/index.js";
 
 export function createJournalState(cell) {
   return {
@@ -78,54 +63,17 @@ function checkParents(state, event, index) {
   }
 }
 
-function applyKeyAdd(state, body, index) {
-  const { purpose, publicKey, contextVersion } = body;
-  if (!ATTESTED_PURPOSES.includes(purpose))
-    throw new JournalError(`unknown key purpose: ${purpose}`, index);
-  if (state.keys[purpose])
-    throw new JournalError(`${purpose} already has an active key`, index);
-  if (contextVersion <= state.highestVersion[purpose]) {
-    throw new JournalError(`${purpose} context version must increase`, index);
-  }
-  const hex = b4a.toString(publicKey, "hex");
-  if (state.usedKeys.has(hex))
-    throw new JournalError("public key was already attested", index);
-  state.usedKeys.add(hex);
-  state.highestVersion[purpose] = contextVersion;
-  state.keys[purpose] = {
-    purpose,
-    publicKey,
-    contextVersion,
-    attestedAt: index,
-  };
-}
-
-function applyKeyRevoke(state, body, index) {
-  const active = ATTESTED_PURPOSES.find(
-    (p) => state.keys[p] && b4a.equals(state.keys[p].publicKey, body.publicKey),
-  );
-  if (!active)
-    throw new JournalError("key.revoke names a key that is not active", index);
-  state.keys[active] = null;
-}
-
 function applyRecord(state, record, index) {
-  let body;
+  let instance;
   try {
-    body = decodeBody(record.type, record.body);
+    instance = nucleusRecords.create(record.type, record.body);
   } catch (err) {
     throw new JournalError(err.message, index);
   }
-  if (record.type === RECORD_TYPES.GENESIS) {
-    if (index !== 0)
-      throw new JournalError("nucleus/genesis is only valid in block 0", index);
-    if (body.protocol !== PROTOCOL)
-      throw new JournalError(`unsupported protocol: ${body.protocol}`, index);
-  } else if (record.type === RECORD_TYPES.KEY_ADD) {
-    applyKeyAdd(state, body, index);
-  } else if (record.type === RECORD_TYPES.KEY_REVOKE) {
-    applyKeyRevoke(state, body, index);
-  }
+  if (!instance) return;
+  const context = { index };
+  instance.validate(state, context);
+  instance.apply(state, context);
 }
 
 /** Applies the next block to `state`, or throws JournalError. Returns `{ event, hash }`. */

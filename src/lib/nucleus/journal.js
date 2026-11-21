@@ -1,20 +1,14 @@
 // The cell's journal: the only code that appends to the journal Hypercore.
 import b4a from "b4a";
+import { JournalError } from "./errors.js";
 import {
   MAX_EVENT_PUBLIC_BYTES,
-  PROTOCOL,
-  RECORD_TYPES,
   EVENT_VERSION,
-  encodeBody,
   encodeEvent,
   publicRecordsSize,
 } from "./events.js";
-import {
-  JournalError,
-  applyBlock,
-  cloneJournalState,
-  createJournalState,
-} from "./replay.js";
+import { PROTOCOL, RECORD_TYPES, encodeBody } from "./records/index.js";
+import { applyBlock, cloneJournalState, createJournalState } from "./replay.js";
 
 export const DEFAULT_URGENT_PER_MINUTE = 6;
 const MINUTE_MS = 60_000;

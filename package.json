@@ -27,7 +27,8 @@
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
     "docs:serve": "cd docs && bundle exec jekyll serve",
-    "docs:build": "cd docs && bundle exec jekyll build"
+    "docs:build": "cd docs && bundle exec jekyll build",
+    "schema:build": "node scripts/build-schema.js"
   },
   "dependencies": {
     "b4a": "^1.9.0",
@@ -36,6 +37,7 @@
     "compact-encoding": "^3.5.2",
     "corestore": "^7.16.1",
     "hypercore": "^11.39.6",
+    "hyperschema": "^1.26.2",
     "hyperswarm": "^4.17.2",
     "js-yaml": "^5.5.0",
     "lodash": "^4.18.1",

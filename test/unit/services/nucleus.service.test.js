@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ServiceBroker } from 'moleculer';
-import { RECORD_TYPES } from '../../../src/lib/nucleus/events.js';
+import { RECORD_TYPES } from '../../../src/lib/nucleus/records/index.js';
 import NucleusService from '../../../src/services/nucleus.service.js';
 import { fixedClock, startCell, testSeed } from '../../helpers/cell.js';
 import { createTestDht } from '../../helpers/testnet.js';

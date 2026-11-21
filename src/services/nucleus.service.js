@@ -3,13 +3,12 @@ import Hyperswarm from "hyperswarm";
 import { Errors } from "moleculer";
 import { getCoreInfo } from "../lib/core.utils.js";
 import {
-  RECORD_TYPES,
   assertRecord,
   decodeEvent,
-  encodeBody,
   hashEvent,
   isValidType,
 } from "../lib/nucleus/events.js";
+import { RECORD_TYPES, encodeBody } from "../lib/nucleus/records/index.js";
 import {
   DEFAULT_URGENT_PER_MINUTE,
   Journal,
