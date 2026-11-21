@@ -1,5 +1,6 @@
 module.exports = {
     testEnvironment: 'node',
+    roots: ['<rootDir>/test']
     moduleNameMapper: {
         '^(\\.{1,2}/.*)\\.js$': '$1.js'
     },
