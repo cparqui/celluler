@@ -92,18 +92,6 @@ describe('NucleusService', () => {
             expect(cell.service.cellConfig.config.seed).toBeUndefined();
         });
 
-        it('fails startup clearly for an old UUID journal', async () => {
-            const store = new Corestore(dir, { primaryKey: testSeed(3), unsafe: true });
-            const journal = store.get({ name: 'journal' });
-            await journal.ready();
-            await journal.append(b4a.from(JSON.stringify({ name: 'old', timestamp: 'x', uuid: 'abc-123' })));
-            await journal.close();
-            await store.close();
-
-            await expect(startCell(testnet, { seed: testSeed(3), storage: 'file', path: dir }))
-                .rejects.toThrow('old UUID-format journal');
-        });
-
         it('fails startup on a bad storage type or a mismatched seed', async () => {
             await expect(startCell(testnet, { storage: 'nope' })).rejects.toThrow('Invalid storage type');
             const first = await startCell(testnet, { seed: testSeed(4), storage: 'file', path: dir });

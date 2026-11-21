@@ -4,7 +4,6 @@ import {
     JournalError,
     applyBlock,
     createJournalState,
-    isLegacyBlock,
     replayJournal
 } from '../../../../src/lib/nucleus/replay.js';
 
@@ -106,19 +105,5 @@ describe('replayJournal', () => {
     it('binds hashes to the cell, so another cell cannot replay the chain', () => {
         const blocks = chain([genesis()], [add('sign', 2)]);
         expect(() => replayJournal(key(8), blocks)).toThrow('prev does not match');
-    });
-});
-
-describe('isLegacyBlock', () => {
-    it('detects the old UUID block', () => {
-        const legacy = { name: 'cell', timestamp: '2025-06-01T00:00:00Z', uuid: 'abcd-1234' };
-        expect(isLegacyBlock(b4a.from(JSON.stringify(legacy)))).toBe(true);
-        expect(isLegacyBlock(b4a.from(JSON.stringify(JSON.stringify(legacy))))).toBe(true);
-    });
-
-    it('does not flag other content', () => {
-        expect(isLegacyBlock(chain([genesis()])[0])).toBe(false);
-        expect(isLegacyBlock(b4a.from('{"a":1}'))).toBe(false);
-        expect(isLegacyBlock(b4a.from('null'))).toBe(false);
     });
 });

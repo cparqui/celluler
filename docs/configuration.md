@@ -73,7 +73,7 @@ cell:
         - 127.0.0.1:49737
 ```
 
-The root seed controls the cell's identity, so treat it as a secret and prefer an environment variable. An injected seed must match the one already in `path`, or startup fails. Storage holding an old UUID-format journal is rejected at startup and is not migrated. The CLI flag `--dht-bootstrap host:port,host:port` overrides `dht.bootstrap`.
+The root seed controls the cell's identity, so treat it as a secret and prefer an environment variable. An injected seed must match the one already in `path`, or startup fails. The CLI flag `--dht-bootstrap host:port,host:port` overrides `dht.bootstrap`.
 
 ### Basic Cell Configuration
 - `name`: Human-readable cell name

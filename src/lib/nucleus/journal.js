@@ -14,21 +14,10 @@ import {
   applyBlock,
   cloneJournalState,
   createJournalState,
-  isLegacyBlock,
 } from "./replay.js";
 
 export const DEFAULT_URGENT_PER_MINUTE = 6;
 const MINUTE_MS = 60_000;
-
-export class LegacyJournalError extends Error {
-  constructor() {
-    super(
-      "This storage holds an old UUID-format journal, which is not supported. " +
-        "Move or delete the data directory to create a new cell identity.",
-    );
-    this.name = "LegacyJournalError";
-  }
-}
 
 /** Applies any newer blocks in `core` to a copy of `state`, which is returned. */
 export async function advanceState(
@@ -98,9 +87,6 @@ export class Journal {
 
   /** Replays an existing journal, or writes genesis to an empty one. */
   static async open(core, opts = {}) {
-    if (core.length > 0 && isLegacyBlock(await core.get(0)))
-      throw new LegacyJournalError();
-
     const state = await advanceState(createJournalState(core.key), core);
     if (state.length !== core.length)
       throw new JournalError("journal has missing local blocks");

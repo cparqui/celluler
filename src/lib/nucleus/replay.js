@@ -153,21 +153,3 @@ export function replayJournal(cell, blocks) {
   for (const block of blocks) applyBlock(state, block);
   return state;
 }
-
-/**
- * True for a block written by the pre-NADI format: JSON carrying a `uuid`.
- * Those journals are not migrated; startup fails with a clear error instead.
- */
-export function isLegacyBlock(block) {
-  try {
-    let value = JSON.parse(b4a.toString(block));
-    if (typeof value === "string") value = JSON.parse(value);
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      typeof value.uuid === "string"
-    );
-  } catch {
-    return false;
-  }
-}
