@@ -1,0 +1,3 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`hashEvent pins the hash definition 1`] = `"c0763f319babc46c503aa19f06f127bfdda0496da59daa498d06fe885569feda"`;
