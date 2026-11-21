@@ -6,20 +6,14 @@ describe("Test 'base' service", () => {
     let service;
 
     beforeAll(async () => {
-        console.log('Test: beforeAll starting');
         service = new BaseService(broker);
         await broker.start();
-        console.log('Test: beforeAll complete');
     });
 
     afterAll(async () => {
-        console.log('Test: afterAll starting');
         if (broker) {
-            console.log('Test: stopping broker');
             await broker.stop();
-            console.log('Test: broker stopped');
         }
-        console.log('Test: afterAll complete');
     });
 
     describe("Test constructor", () => {
