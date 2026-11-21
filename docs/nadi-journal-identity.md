@@ -1,10 +1,16 @@
 # NADI Journal, Identity & Messaging — Design Spec
 
-**Status:** Draft v0.2 (2026-11-18) · **Layer:** NADI (L1) · **Supersedes:** the Nucleus/Message sections of `architecture.md` and `services.md` where they conflict. · **Companion:** [NADI Consensus](nadi-consensus.md)
+**Status:** Draft v0.3 (2026-11-20) · **Layer:** NADI (L1) · **Supersedes:** the Nucleus/Message sections of `architecture.md` and `services.md` where they conflict. · **Companion:** [NADI Consensus](nadi-consensus.md)
 
-This spec defines the foundation every other Celluler service builds on: how a cell holds keys, what its journal is, how private data is stored and proven, how identity is verified, and how messages move reliably between cells. It defines **syntax, not semantics**: the Nucleus and Message services define formats and guarantees; higher services (Auth, Identity, Consensus, and later PRANA and BUDDHI services) define what their records, transactions and messages mean.
+This spec defines the foundation every other Celluler service builds on: how a cell holds keys, what its journal is, how private data is stored and proven, how identity is verified, and how messages move reliably between cells. It defines **syntax, not semantics**: the Nucleus and Message services define formats and guarantees; higher services (Auth, Identity, Consensus, and later PRANA and BUDDHI services) define what their records and messages mean.
 
-### Changes from v0.1
+### Changes in v0.3
+- **One record primitive.** The Nucleus has a single type registry and a single `record` call; visibility (`private` or `public`) is chosen per record, not per type.
+- **A transaction is a public message.** Messages are addressed to a cell, a topic, or `public`; public messages are written inline into the journal and ordered by consensus. There is no separate transaction type or `tx` event kind.
+- **Only the Nucleus creates events.** Services no longer call `emit`; events are created on consensus syncs, revealed receipts and rate-limited urgent public records. The event `kind` field is removed.
+- Root seed size and post-quantum notes added (§3.1).
+
+### Changes in v0.2
 - The journal **is the cell's event chain** (one Hypercore per cell); there is no separate event core, and separate epoch records are replaced by a commitment root in every event.
 - **Owners never delete.** Retention classes and routine pruning are removed. The private store is a mutable local database; redaction is a rare, explicit, recorded exception.
 - Messaging is **reliable**: pairwise links with sender-owned link cores, an inbox, delivery receipts, offline delivery through blind replicas, and per-sender topic cores for multicast.
@@ -18,7 +24,7 @@ This spec defines the foundation every other Celluler service builds on: how a c
 | L2 | **PRANA** — Public Resource Alliance Network Architecture | Token, quadratic funding/voting, co-op and private commons, decision circles |
 | L3 | **BUDDHI** — Builder-owned, Universally Distributed, Democratically Hosted Intelligence | Compute, data, model and agent commons |
 
-A service may depend only on services in its own layer or below. The **Nucleus depends on nothing; the Message service depends only on the Nucleus.** Every other service plugs in by registering record and transaction types (with the Nucleus) and message protocols (with the Message service).
+A service may depend only on services in its own layer or below. The **Nucleus depends on nothing; the Message service depends only on the Nucleus.** Every other service plugs in by registering record types (with the Nucleus) and message protocols (with the Message service).
 
 ## 2. Design principles
 
@@ -33,7 +39,15 @@ A service may depend only on services in its own layer or below. The **Nucleus d
 
 ### 3.1 Root seed
 
-Each cell has one 32-byte **root seed**, persisted by Corestore as its primary key under file storage. In `memory` storage it is lost on restart, so memory mode is for tests only.
+Each cell has one 32-byte (256-bit) **root seed**, persisted by Corestore as its primary key under file storage. In `memory` storage it is lost on restart, so memory mode is for tests only.
+
+**Why 256 bits is enough.** The seed is never the weakest point:
+
+- Guessing the seed takes ~2²⁵⁶ tries. The cheaper attack is to derive the journal private key directly from the cell ID, a discrete logarithm on Curve25519, which takes ~2¹²⁶ operations. That ~128-bit level is set by the curve, so a 1,024- or 2,048-bit seed would add nothing: every key is still a 256-bit Curve25519 key. Those larger sizes come from RSA, which needs far more bits for the same security.
+- Knowing the cell ID or any public key does not help find the seed: keys are derived with a one-way keyed hash (§3.2), so recovering the seed from a derived key means inverting BLAKE2b.
+- **Quantum:** Shor's algorithm would break Ed25519 and X25519 whatever the seed length. Grover's algorithm only reduces a 256-bit seed search to ~2¹²⁸, still out of reach. Post-quantum protection therefore means new key types (e.g. hybrid ML-DSA and ML-KEM keys attested with `nucleus/key.add`), not a longer seed; the journal key itself cannot change (open question §13).
+
+The practical risks are generating the seed with weak randomness (it must come from the OS CSPRNG, e.g. sodium `randombytes_buf`) and seed theft at rest (the seed file should be protected by the OS keystore or a passphrase).
 
 ### 3.2 Derived keys
 
@@ -46,12 +60,12 @@ All keys are derived deterministically from the seed with distinct context label
 | Encryption key | X25519 | `H(seed, "celluler/box/v1")` | Sealed boxes; pairwise link secrets (§9.2) |
 | Swarm key | Ed25519 (Noise) | `H(seed, "celluler/swarm/v1")` → `DHT.keyPair` | Hyperswarm transport authentication |
 | Storage key | XChaCha20 | `H(seed, "celluler/store/v1")` | Encrypts the private store and key index at rest |
-| Salt key | keyed hash | `H(seed, "celluler/salt/v1")` | Per-record commitment salts (§5.3) |
+| Salt key | keyed hash | `H(seed, "celluler/salt/v1")` | Per-record commitment salts (§5.4) |
 | Link core keys | Ed25519 | `H(seed, "celluler/link/v1" ‖ peerId)` | Sender-owned core per link (§9.3) |
 | Topic core keys | Ed25519 | `H(seed, "celluler/topic/v1" ‖ topicId)` | Sender-owned core per topic (§9.8) |
 | Shard core keys | Ed25519 | `H(seed, "celluler/shard/v1" ‖ j)` | Backup shards for custodian slot *j* (§10) |
 
-Every non-journal public key that others must trust (signing, encryption, swarm) is attested by a `key.add` event before use. Keys are separated by purpose to avoid cross-protocol attacks.
+Every non-journal public key that others must trust (signing, encryption, swarm) is attested by a public `nucleus/key.add` record before use. Keys are separated by purpose to avoid cross-protocol attacks.
 
 ### 3.3 Why not RSA
 
@@ -59,7 +73,7 @@ RSA-2048 signatures are 256 B vs 64 B for Ed25519, key generation takes ~40 ms v
 
 ### 3.4 Rotation and compromise
 
-- Derived keys rotate via `key.revoke` + `key.add` events with a new context version (e.g. `sign/v2`).
+- Derived keys rotate via public `nucleus/key.revoke` + `nucleus/key.add` records with a new context version (e.g. `sign/v2`).
 - The journal key cannot rotate within one Hypercore. Root recovery options (open question §13): a Hypercore multi-signer manifest, or a successor journal whose genesis is co-attested by the old key and/or guardians (§10.5).
 - Concurrent use of a stolen journal key forks the journal, which is detected and provable (§7.3).
 
@@ -133,62 +147,95 @@ This is comfortable for desktops and servers and the main constraint for phones;
 
 ## 5. Events and records
 
-### 5.1 Event (one journal block)
+### 5.1 Records
+
+Everything a cell writes is a **record**. Whether it is public or private is chosen each time it is written, not fixed by its type.
+
+```
+Record { type: "<service>/<name>", ts, refs: [Ref], body: bytes }
+Ref    { cell: bytes32, index: uint, hash: bytes32 }
+```
+
+| Visibility | Stored | Reaches the journal as |
+|---|---|---|
+| `private` | full record in the private store | a salted leaf hash inside the next event's `commits` root (§5.4) |
+| `public` | full record in the private store index **and** inline in the journal | the record itself, inside the next event's `public` list |
+
+Public records are permanent and replicated with the journal, so they cannot be redacted. Inline bodies are capped at **1 KB**; larger public content is stored as a content-addressed blob owned by the cell and referenced by hash.
+
+### 5.2 Event (one journal block)
 
 ```
 Event {
   v:           uint            // format version, = 1
-  kind:        string          // §5.2
   ts:          uint            // creator's claimed time, ms (consensus assigns the real time)
   otherParent: Ref | null      // the peer event this event records hearing from
-  commits:     bytes32 | null  // Merkle root of private-record leaves since the previous event (§5.3)
-  payload:     bytes           // kind-specific; for `tx`, service-defined
+  commits:     bytes32 | null  // Merkle root of private leaves since the previous event (§5.4)
+  public:      [Record]        // public records since the previous event (≤ 8 KB in total)
 }
-Ref { cell: bytes32, index: uint, hash: bytes32 }
 ```
 
 - **Self-parent is implicit:** event *i*'s self-parent is block *i − 1* of the same journal.
-- **Signature is Hypercore's:** each append is signed by the journal key.
+- **Signature is Hypercore's:** each append is signed by the journal key, which also signs every public record in the event.
+- **No `kind` field:** what an event means comes from its `otherParent` and the types of its public records.
 - **Encoding:** deterministic (recommended `compact-encoding`; alternative canonical JSON, RFC 8785). Plain `JSON.stringify` is not acceptable.
 
-### 5.2 Event kinds
+### 5.3 Who creates events, and when
 
-| Kind | otherParent | Payload |
+**Only the Nucleus appends events.** Services write records; they never create events, which keeps journal growth under the Nucleus's control and keeps services independent of consensus mechanics. An event is created when:
+
+| Trigger | otherParent | Notes |
 |---|---|---|
-| `genesis` | — | `{ protocol: "celluler/1", created }` — block 0, nothing else |
-| `sync` | peer's head event | none (a ping in consensus v1) |
-| `message` | sender's event that committed the message | `{ link, index, bodyHash }` — a **revealed** message receipt (§8.3) |
-| `tx` | any | `{ type, body }` — public transaction; `type` owned by a registered service |
-| `key.add` / `key.revoke` | — | `{ purpose, publicKey, contextVersion }` / `{ publicKey, reason? }` |
-| `edge.reveal` | — | co-signed public relationship (§8.4) |
-| `profile` | — | optional public profile or a commitment to one |
-| `terminal` | — | `{ successor? }` — the cell's end, or move to a successor journal |
+| Genesis | — | block 0; `public: [nucleus/genesis]` |
+| Consensus sync | partner's head event | requested by the ConsensusService through a reserved interface (`nucleus.sync`); carries any pending public records and the `commits` root |
+| Revealed receipt (§8.3) | sender's event that carried or committed the message | needs its own event, because an event has only one other-parent |
+| Urgent public record | — | the writer asked for immediate publication; rate-limited (6 per minute proposed) |
+| Size limit reached | — | pending public records exceed 8 KB |
 
-Any event may carry `commits`. Private activity (sends, receipts, inbox entries, edges, service records) therefore reaches the journal at the rate events are created, not at the rate messages flow.
+Otherwise records wait for the next event; with v1 pings at one per minute, that is at most about a minute.
 
-### 5.3 Private records and commitments
+**Nucleus public record types:**
+
+| Type | Body |
+|---|---|
+| `nucleus/genesis` | `{ protocol: "celluler/1", created }` |
+| `nucleus/key.add` / `nucleus/key.revoke` | `{ purpose, publicKey, contextVersion }` / `{ publicKey, reason? }` |
+| `nucleus/edge.reveal` | co-signed public relationship (§8.4) |
+| `nucleus/profile` | optional public profile or a commitment to one |
+| `nucleus/terminal` | `{ successor? }` — the cell's end, or move to a successor journal |
+
+Other services register their own public types, e.g. `msg/receipt` (§8.3) and `consensus/checkpoint.sig`; public messages use their protocol as their type (§9.3).
+
+### 5.4 Private commitments
 
 ```
-Record { type: "<service>/<record>", ts, refs: [Ref], body: bytes }
-
 salt  = H(saltKey, recordSeq)                 // derived, never stored
 leaf  = H(salt ‖ encode(Record))              // BLAKE2b-256
-event.commits = MerkleRoot(leaves recorded since the previous event)
+event.commits = MerkleRoot(private leaves recorded since the previous event)
 ```
 
-Inclusion proof size is ⌈log₂ *n*⌉ × 32 B for *n* leaves in one event's batch (typically small; 1,024 leaves → 320 B).
+Private activity (sends, receipts, inbox entries, edges, service state) therefore reaches the journal at the rate events are created, not at the rate messages flow. Inclusion proof size is ⌈log₂ *n*⌉ × 32 B for *n* leaves in one event's batch (1,024 leaves → 320 B). A public record needs no salt or leaf: it is proven by the Hypercore proof of the block that contains it.
 
-### 5.4 Nucleus API
+### 5.5 Nucleus API
 
 ```js
-nucleus.registerRecordType({ type: "msg/received", owner: "message" })   // private
-nucleus.registerTxType({ type: "prana/vote", owner: "prana-governance" })  // public tx
-nucleus.record({ type, body, refs })  → { seq, leaf }      // committed in the next event
-nucleus.emit({ kind: "tx", payload, otherParent? }) → { index }
+// One registry: owner and schema; visibility is not part of the type
+nucleus.registerType({ type: "msg/received", owner: "message", schema })
+
+// One write primitive
+nucleus.record({ type, body, refs,
+                 visibility: "private" | "public",
+                 urgent?,          // public only: publish in an event now (rate-limited)
+                 parent? })        // public only, for registered receipt types: own event with this otherParent
+  → { seq, leaf? , event? }
+
 nucleus.query({ type, from?, to?, limit? })
 nucleus.prove({ seq, disclose: "full" | "leaf" }) → Proof
-nucleus.redact({ seq, reason })
+nucleus.redact({ seq, reason })   // private records only
 nucleus.getCellId()
+
+// Reserved for the ConsensusService
+nucleus.sync({ peerHead }) → { index }
 ```
 
 ## 6. What is public, what is private
@@ -197,8 +244,8 @@ nucleus.getCellId()
 |---|---|
 | genesis, keys, profile (optional) | message bodies, inbox, receipts |
 | sync events (who synced with whom, when) | private relationship edges |
-| revealed message receipts and edges | service records |
-| public transactions | key material, link secrets, key index |
+| revealed message receipts and edges | service state |
+| public messages (votes, checkpoint signatures, other "transactions") | key material, link secrets, key index |
 | commitment roots | everything needed to open commitments |
 
 Sync partners in consensus v1 are chosen by verifiable randomness (consensus doc §4.3), so public sync events reveal participation but not relationships.
@@ -230,7 +277,7 @@ Verification: check the signed journal length, read event `event`, check `root`,
 
 ### 7.2 Continuous possession
 
-Each `sync` event commits to the peer's latest event hash, which did not exist before that moment. Every sync event therefore proves its creator held the journal key at that time; T1 needs no separate challenge inside a cluster.
+Each sync event commits to the peer's latest event hash, which did not exist before that moment. Every sync event therefore proves its creator held the journal key at that time; T1 needs no separate challenge inside a cluster.
 
 ### 7.3 Clone and fork detection
 
@@ -250,14 +297,14 @@ A message's send and receipt are private records, reaching the journal only insi
 
 ### 8.3 Revealed messages
 
-For relationships the parties have made public, the receiver may emit a `message` event whose `otherParent` is the sender's event that committed the message. The receipt is then publicly and causally linked to the send.
+For relationships the parties have made public, the receiver records a public `msg/receipt { from, link, index, bodyHash }` with `parent` set to the sender's event that carried or committed the message. The Nucleus gives it its own event with that `otherParent`, so the receipt is publicly and causally linked to the send.
 
 ### 8.4 Co-signed edge reveal
 
 An edge reveals the counterparty's relationship too, so publishing one needs both cells:
 
 ```
-edge.reveal payload: { peer, kind, since: Ref, sigs: [selfSig, peerSig] }
+nucleus/edge.reveal body: { peer, kind, since: Ref, sigs: [selfSig, peerSig] }
 ```
 
 `kind` is protocol-defined (e.g. `prana/coop.member`, `nadi/vouch`). A protocol may list required kinds; a cell that declines simply cannot participate in it.
@@ -267,6 +314,16 @@ edge.reveal payload: { peer, kind, since: Ref, sigs: [selfSig, peerSig] }
 ### 9.1 Scope
 
 The Message service moves messages between cells **reliably**, records sends, receipts and inbox entries through the Nucleus, and dispatches to handlers registered by other services. It defines no message types and depends only on the Nucleus.
+
+A message is addressed to one of three destinations, which decides its transport and visibility:
+
+| Destination | Transport | What the journal holds | Delivery evidence |
+|---|---|---|---|
+| a cell | sender's link core (§9.3) | private leaf hashes of the send and receipt | signed receipts (§9.5) |
+| a topic | sender's topic core (§9.8) | private leaf hashes | optional, per protocol |
+| `public` | **the journal itself** (§9.12) | the full message | consensus finality |
+
+A "transaction" is simply a public message: a vote, a checkpoint signature or a ledger entry, defined by the protocol of the service that owns it.
 
 ### 9.2 Links (handshake)
 
@@ -291,7 +348,7 @@ Message {
 }
 ```
 
-A also records a private `msg/sent` record, committed by its next event.
+A also records a private `msg/sent` record, committed by its next event. The `sig` field lets B, and anyone B shows the message to, verify it apart from A's link core.
 
 ### 9.4 Receiving and the inbox
 
@@ -342,12 +399,18 @@ Either side appends `link.close` to its link core and records it privately; the 
 ### 9.11 Handler registration
 
 ```js
-message.register({ protocol: "auth/1", handler: "auth.onMessage" })
-message.link({ to })                       → { status }     // handshake
-message.send({ to, protocol, body })       → { id, index }
-message.publish({ topic, protocol, body }) → { id, index }
-message.status({ id })                     → "sent" | "delivered" | "processed"
+message.register({ protocol: "prana-vote/1", handler: "governance.onVote" })  // also registers the type with the Nucleus
+message.link({ to })                                         → { status }     // handshake
+message.send({ to: cellId | { topic } | "public", protocol, body, urgent? }) → { id }
+message.status({ id })   // "sent" | "delivered" | "processed"   (cells)
+                         // "pending" | "in-event" | "final"      (public)
 ```
+
+### 9.12 Public messages
+
+- `message.send({ to: "public", … })` calls `nucleus.record({ type: protocol, body, visibility: "public", urgent })`; the message appears inline in the sender's next event (§5.3). The journal's Hypercore signature covers it, so no separate `sig` is needed.
+- Public messages are not pushed to anyone. Any cell that replicates the sender's journal (cluster peers, followers, anyone computing shared state) sees them in the global order and dispatches them to the handler registered for their protocol.
+- A public message's time is the consensus time of the event that contains it, so public messages from anywhere in the network are totally ordered.
 
 ## 10. Private store backup and recovery
 
@@ -422,7 +485,7 @@ Journal growth vs sync rate; private store write throughput; backup encode/uploa
 |---|---|
 | RSA-2048 keypair generated in memory on each start | Remove; derive keys from root seed (§3) |
 | `generateCellUUID` in block 0 | Cell ID = journal public key; block 0 = `genesis` event |
-| `write` stringifies JSON into a `valueEncoding: 'json'` core (double-encoded) | Journal accepts only encoded events via `emit`; services `record` |
+| `write` stringifies JSON into a `valueEncoding: 'json'` core (double-encoded) | Only the Nucleus appends events; services call `record` |
 | Any caller may write arbitrary data to any core | Writes only through the Nucleus with registered types |
 | `memory` storage default | Keep for tests; warn that identity is not persistent |
 | `MessageService` depends on `identity` and `consensus`, hard-codes CHAT/AUTH/TX/POST/QUERY/EXEC | Depends on `nucleus` only; link-based delivery; types become registered protocols |
@@ -442,3 +505,6 @@ Journal growth vs sync rate; private store write throughput; backup encode/uploa
 9. **Backup parameters:** default k/n, chunk interval, AONT-RS default.
 10. **First contact defaults:** introduction only, or a public request topic by default?
 11. **Blind replica selection:** custodians, cluster peers, or both.
+12. **Public record limits:** 1 KB inline per record and 8 KB per event proposed; larger bodies referenced by hash.
+13. **Urgent events:** default rate limit (6 per minute proposed) and who may use the flag.
+14. **Post-quantum migration:** when to add hybrid PQ keys, and how a journal whose own key is Ed25519 survives a break of Ed25519.

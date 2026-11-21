@@ -20,7 +20,7 @@ Hashgraph (Baird, Swirlds 2016) reaches asynchronous Byzantine fault-tolerant co
 - **Virtual voting.** Every member holds the same DAG, so each computes how every other member *would* vote without any vote messages. This yields rounds, famous witnesses, and a **consensus order** of all events.
 - **Consensus timestamp.** Each event's timestamp is the median of the times members first received it, which is fair as long as honest members' clocks are roughly right.
 
-In Celluler, **a Hashgraph event is a journal event** (spec §5.1): the self-parent is the previous journal block, the other-parent is the event's `otherParent`, and the signature is the journal's Hypercore signature. A fork in a journal is exactly Hashgraph's equivocation.
+In Celluler, **a Hashgraph event is a journal event** (spec §5.2): the self-parent is the previous journal block, the other-parent is the event's `otherParent`, and the signature is the journal's Hypercore signature. A fork in a journal is exactly Hashgraph's equivocation.
 
 ## 2. Prior art: what Hashgraph and Hedera do not provide
 
@@ -61,7 +61,7 @@ A cluster is a set of about *N* cells that run one Hashgraph instance together. 
 ### 4.3 v1 syncs: verifiable random pings
 
 - Each cell syncs at rate *f*₀. Its partner for the next sync is `members[H(lastEventHash) mod |members|]`, so anyone can check that it synced with whom it was supposed to.
-- Syncs are **two-way**: both cells exchange missing journal blocks (Hypercore replication) and each appends a `sync` event whose `otherParent` is the other's latest event.
+- Syncs are **two-way**: both cells exchange missing journal blocks (Hypercore replication) and each asks its Nucleus to append a sync event (spec §5.3) whose `otherParent` is the other's latest event.
 - Cluster members replicate all members' journals for the duty window (spec §4.3).
 
 ### 4.4 Roster, liveness and offline cells
@@ -94,7 +94,7 @@ Checkpoint {
 }
 ```
 
-It is final when members holding more than 2/3 of active weight have signed it (signatures travel as `tx` events, spec §5.2). With *N* = 100 that is 67 signatures, ~6.6 KB per checkpoint without aggregation.
+It is final when members holding more than 2/3 of active weight have signed it (signatures travel as public `consensus/checkpoint.sig` messages, spec §9.12). With *N* = 100 that is 67 signatures, ~6.6 KB per checkpoint without aggregation.
 
 ## 5. Higher levels
 
@@ -149,7 +149,8 @@ The local order of a cluster may differ from the global order in the rare cases 
 
 | Message kind (spec §8) | Position in the global order |
 |---|---|
-| Revealed (`message` event linked to the sender's event) | Exact: send < receipt by causality |
+| Revealed (public `msg/receipt` in an event linked to the sender's event) | Exact: send < receipt by causality |
+| Public (`to: "public"`) | Exact: the consensus time of the event that contains it |
 | Committed (private) | The interval between the sender's event that commits the send and the receiver's event that commits the receipt; provable on disclosure |
 
 ### 6.5 Finality latency
