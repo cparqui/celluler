@@ -4,17 +4,20 @@ import { ServiceBroker } from "moleculer";
 import path from 'path';
 import { promisify } from 'util';
 import NucleusService from "../../../src/services/nucleus.service.js";
+import { createTestDht } from "../../helpers/testnet.js";
 
 const rmrf = promisify(fs.rm);
 const mkdir = promisify(fs.mkdir);
 
 describe("Test 'nucleus' service", () => {
     let broker;
+    let testnet;
     let service;
     const testDataDir = path.join(process.cwd(), 'tmp', 'test', 'data');
     const testDataDir2 = path.join(process.cwd(), 'tmp', 'test', 'data2');
 
     beforeAll(async () => {
+        testnet = await createTestDht();
         // Clean up any existing test data
         try {
             await rmrf(testDataDir, { recursive: true, force: true });
@@ -36,6 +39,7 @@ describe("Test 'nucleus' service", () => {
             name: 'test-cell',
             config: {
                 storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                 path: testDataDir
             }
         });
@@ -47,6 +51,7 @@ describe("Test 'nucleus' service", () => {
         if (broker) {
             await broker.stop();
         }
+        await testnet.destroy();
 
         // Clean up test data
         try {
@@ -191,7 +196,8 @@ describe("Test 'nucleus' service", () => {
         it("should handle invalid storage type", async () => {
             const invalidService = new NucleusService(broker, {
                 config: {
-                    storage: 'invalid'
+                    storage: 'invalid',
+                    dht: { bootstrap: testnet.bootstrap }
                 }
             });
             expect(invalidService.store).toBeUndefined();
@@ -255,6 +261,7 @@ describe("Test 'nucleus' service", () => {
                 name: 'different-cell',
                 config: {
                     storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                     path: './tmp/test/data2',
                 }
             });
@@ -287,6 +294,7 @@ describe("Test 'nucleus' service", () => {
                 name: 'different-cell',
                 config: {
                     storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                     path: './tmp/test/data2',
                 }
             });
@@ -313,6 +321,7 @@ describe("Test 'nucleus' service", () => {
                 name: 'different-cell',
                 config: {
                     storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                     path: './tmp/test/data2',
                 }
             });
@@ -342,6 +351,7 @@ describe("Test 'nucleus' service", () => {
             const cleanupService = new NucleusService(broker2, {
                 config: {
                     storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                     path: './tmp/test/data2'
                 }
             });

@@ -135,7 +135,8 @@ export default class NucleusService extends BaseService {
 
             // Initialize hyperswarm
             this.logger.info("Initializing Hyperswarm...");
-            this.swarm = new Hyperswarm();
+            // No bootstrap means Hyperswarm's default, the public DHT.
+            this.swarm = new Hyperswarm(this.settings.dht?.bootstrap ? { bootstrap: this.settings.dht.bootstrap } : {});
             this.swarm.on('connection', (conn) => {
                 this.logger.debug("New Hyperswarm connection established");
                 if (this.store) {

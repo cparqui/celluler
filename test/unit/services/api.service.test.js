@@ -4,17 +4,20 @@ import path from 'path';
 import { promisify } from 'util';
 import ApiService from "../../../src/services/api.service.js";
 import NucleusService from "../../../src/services/nucleus.service.js";
+import { createTestDht } from "../../helpers/testnet.js";
 
 const rmrf = promisify(fs.rm);
 const mkdir = promisify(fs.mkdir);
 
 describe("ApiService", () => {
     let broker;
+    let testnet;
     let apiService;
     let nucleusService;
     const testDataDir = path.join(process.cwd(), 'tmp', 'test', 'data');
 
     beforeAll(async () => {
+        testnet = await createTestDht();
         // Clean up any existing test data
         try {
             await rmrf(testDataDir, { recursive: true, force: true });
@@ -34,6 +37,7 @@ describe("ApiService", () => {
             name: 'test-cell',
             config: {
                 storage: 'file',
+                dht: { bootstrap: testnet.bootstrap },
                 path: testDataDir
             }
         });
@@ -55,6 +59,7 @@ describe("ApiService", () => {
         if (broker) {
             await broker.stop();
         }
+        await testnet.destroy();
     });
 
     beforeEach(() => {
