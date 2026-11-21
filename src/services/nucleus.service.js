@@ -17,6 +17,7 @@ const DEFAULT_QUERY_LIMIT = 100;
 const MAX_QUERY_LIMIT = 1000;
 const DEFAULT_REPLICATE_TIMEOUT_MS = 10_000;
 const REPLICATE_POLL_MS = 25;
+const REPLICATE_REFRESH_MS = 500;
 
 // `protected` actions can be called only from this node: not through the API
 // gateway (which allows nucleus.*) and not from other nodes on the transporter.
@@ -45,6 +46,19 @@ function parseInput(parse) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Resolves on the core's next append, or after `ms`, always on a later event-loop turn. */
+function nextAppend(core, ms) {
+    return new Promise((resolve) => {
+        const finish = () => {
+            clearTimeout(timer);
+            core.off('append', finish);
+            resolve();
+        };
+        const timer = setTimeout(finish, ms);
+        core.once('append', finish);
+    });
+}
 
 export default class NucleusService extends BaseService {
     // The seed never enters `settings` or `cellConfig`: Moleculer publishes
@@ -302,18 +316,36 @@ export default class NucleusService extends BaseService {
         return { events, nextIndex: index < end ? index : null };
     }
 
-    /** Replays a journal from block 0 and checks its signed head. Never throws for a bad journal. */
+    /**
+     * Replays the locally held prefix of a journal from block 0. A peer's copy can
+     * know a newer length before it has those blocks: then `complete` is false,
+     * `verifiedLength` says how far replay got, and `signature` is null (unchecked).
+     * Never throws for a bad journal.
+     */
     async verifyJournal(ctx) {
         const core = this.#coreOf(ctx.params.cell);
-        const report = { cell: toHex(core.key), valid: false, length: core.length, signature: false, head: null, keys: null, error: null };
+        const report = {
+            cell: toHex(core.key),
+            valid: false,
+            complete: false,
+            length: core.length,
+            verifiedLength: 0,
+            signature: null,
+            head: null,
+            keys: null,
+            error: null
+        };
         try {
             const state = await advanceState(createJournalState(core.key), core);
-            if (state.length !== core.length) throw new Error(`missing local block ${state.length}`);
             if (state.length === 0) throw new Error('journal is empty');
+            report.verifiedLength = state.length;
+            report.complete = state.length === core.length;
             report.head = toHex(state.head);
             report.keys = serializeKeys(state.keys);
-            report.signature = await verifyCoreSignature(core);
-            if (!report.signature) throw new Error('invalid journal signature');
+            if (report.complete) {
+                report.signature = await verifyCoreSignature(core);
+                if (report.signature === false) throw new Error('invalid journal signature');
+            }
             report.valid = true;
         } catch (err) {
             report.error = err.message;
@@ -431,23 +463,37 @@ export default class NucleusService extends BaseService {
         done();
 
         const deadline = Date.now() + timeout;
+        let nextRefresh = Date.now() + REPLICATE_REFRESH_MS;
         while (peer.core.length < minLength) {
             if (Date.now() >= deadline) {
                 throw reject(`Timed out replicating journal ${cell}`, 'REPLICATION_TIMEOUT', 504);
             }
             await Promise.race([peer.core.update({ wait: true }), sleep(REPLICATE_POLL_MS)]);
-            if (peer.core.length < minLength && this.swarm.connections.size === 0) {
+            // update() can settle without yielding, so always give network I/O a turn.
+            await nextAppend(peer.core, REPLICATE_POLL_MS);
+            if (peer.core.length < minLength && peer.core.peers.length === 0 && Date.now() >= nextRefresh) {
+                nextRefresh = Date.now() + REPLICATE_REFRESH_MS;
                 await discovery.refresh({ client: true, server: true });
             }
         }
 
-        const remaining = Math.max(deadline - Date.now(), 1);
-        const state = await advanceState(peer.state, peer.core, { wait: true, timeout: remaining }).catch((err) => {
-            throw reject(`Invalid journal ${cell}: ${err.message}`, 'INVALID_JOURNAL');
-        });
-        if (!(await verifyCoreSignature(peer.core))) {
-            throw reject(`Invalid journal signature for ${cell}`, 'INVALID_JOURNAL');
-        }
+        let state;
+        let signature;
+        do {
+            if (Date.now() >= deadline) {
+                throw reject(`Timed out replicating journal ${cell}`, 'REPLICATION_TIMEOUT', 504);
+            }
+            const remaining = Math.max(deadline - Date.now(), 1);
+            state = await advanceState(peer.state, peer.core, { wait: true, timeout: remaining }).catch((err) => {
+                if (err.name !== 'JournalError') {
+                    throw reject(`Timed out replicating journal ${cell}: ${err.message}`, 'REPLICATION_TIMEOUT', 504);
+                }
+                throw reject(`Invalid journal ${cell}: ${err.message}`, 'INVALID_JOURNAL');
+            });
+            // null means the peer appended again before the new head was downloaded.
+            signature = await verifyCoreSignature(peer.core);
+        } while (signature === null);
+        if (!signature) throw reject(`Invalid journal signature for ${cell}`, 'INVALID_JOURNAL');
         peer.state = state;
         return { cell, length: state.length, head: await this.getHead({ params: { cell } }) };
     }

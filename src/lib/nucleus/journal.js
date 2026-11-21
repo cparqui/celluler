@@ -31,13 +31,18 @@ export async function advanceState(state, core, { wait = false, timeout = 0 } = 
  * Checks the journal's signed head against the single Ed25519 signer in its manifest.
  * Hypercore already verifies this on replication; this makes the check explicit.
  * It uses Hypercore's verifier and head signature, which are internal to ^11.
+ * @returns {Promise<boolean | null>} null if the signed head block is not held locally.
  */
 export async function verifyCoreSignature(core, signature = core.state.signature) {
+    // Read these together, before any await, so a concurrent append cannot mismatch them.
+    const length = core.signedLength;
+    const fork = core.fork;
     const signers = core.manifest?.signers ?? [];
     if (signers.length !== 1 || core.manifest.quorum !== 1 || !signature) return false;
-    const signable = await core.signable(core.signedLength, core.fork);
+    if (length > 0 && !(await core.has(length - 1))) return null;
+    const signable = await core.signable(length, fork);
     try {
-        return core.core.verifier.verify({ length: core.signedLength, signable: () => signable }, signature);
+        return core.core.verifier.verify({ length, signable: () => signable }, signature);
     } catch {
         return false;
     }

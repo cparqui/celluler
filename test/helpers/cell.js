@@ -18,7 +18,12 @@ export function fixedClock(start = 1_700_000_000_000, step = 1) {
 
 /** Starts one cell (a broker with a Nucleus) on the given testnet. */
 export async function startCell(testnet, { seed = testSeed(0), storage = 'memory', name = 'test-cell', ...config } = {}) {
-    const broker = new ServiceBroker({ logger: false, metrics: false, nodeID: `${name}-${process.hrtime.bigint()}` });
+    const broker = new ServiceBroker({
+        logger: false,
+        metrics: false,
+        nodeID: `${name}-${process.hrtime.bigint()}`,
+        registry: { stopDelay: 0 } // Moleculer otherwise waits 100 ms on every stop
+    });
     const service = new NucleusService(broker, {
         name,
         config: { storage, seed, dht: { bootstrap: testnet.bootstrap }, ...config }

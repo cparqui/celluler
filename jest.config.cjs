@@ -8,7 +8,6 @@ module.exports = {
     },
     testTimeout: 30000,
     forceExit: true,
-    detectOpenHandles: true,
     collectCoverage: true,
     coverageDirectory: 'coverage',
     coverageReporters: ['text', 'lcov', 'html'],
