@@ -12,7 +12,7 @@ export const DEFAULT_LOG_LEVELS = {
     TRACING: 'warn',
     REGISTRY: 'warn',
     DISCOVERER: 'warn',
-    TRANSIT: 'warn',
+    TRANSIT: 'warn'
 };
 
 export const DEFAULT_CONFIG = {
@@ -62,7 +62,7 @@ function resolveEnvVars(obj) {
         });
     }
     if (Array.isArray(obj)) {
-        return obj.map(item => resolveEnvVars(item));
+        return obj.map((item) => resolveEnvVars(item));
     }
     if (typeof obj === 'object' && obj !== null) {
         const result = {};
@@ -78,7 +78,7 @@ export async function loadConfig(configPath) {
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
         const config = loadYaml(configContent);
-        
+
         // Handle configuration inheritance
         let baseConfig = DEFAULT_CONFIG;
         if (config.extends) {
@@ -86,25 +86,29 @@ export async function loadConfig(configPath) {
             baseConfig = await loadConfig(basePath);
             delete config.extends; // Remove the extends property
         }
-        
+
         // Merge with base configuration
         const mergedConfig = _.defaultsDeep(config, baseConfig);
-        
+
         // Resolve environment variables
         const resolvedConfig = resolveEnvVars(mergedConfig);
-        
+
         // Ensure logging configuration is properly set
         if (resolvedConfig.cell.logging) {
             // If logging.level is a string, convert it to an object with that level for all modules
             if (typeof resolvedConfig.cell.logging.level === 'string') {
                 resolvedConfig.cell.logging.level = {
-                    "**": resolvedConfig.cell.logging.level
+                    '**': resolvedConfig.cell.logging.level
                 };
             }
-            
+
             // Merge with default log levels using defaultsDeep to handle nested levels
-            resolvedConfig.cell.logging.level = _.defaultsDeep({}, resolvedConfig.cell.logging.level, DEFAULT_LOG_LEVELS);
-            
+            resolvedConfig.cell.logging.level = _.defaultsDeep(
+                {},
+                resolvedConfig.cell.logging.level,
+                DEFAULT_LOG_LEVELS
+            );
+
             // Ensure output array exists
             if (!resolvedConfig.cell.logging.output) {
                 resolvedConfig.cell.logging.output = [{
@@ -118,7 +122,7 @@ export async function loadConfig(configPath) {
                 }];
             }
         }
-        
+
         return resolvedConfig;
     } catch (err) {
         throw new Error(`Error loading configuration: ${err.message}`);
@@ -169,7 +173,7 @@ export function createMoleculerConfig(cellConfig, debug = false) {
 
 // Service map for dynamic loading
 const SERVICE_MAP = {
-    nucleus: NucleusService,
+    nucleus: NucleusService
     // Add other services here as they are implemented
     // message: MessageService,
     // identity: IdentityService,
@@ -182,7 +186,7 @@ export async function startCell(config, debug = false) {
         console.log('Creating Moleculer configuration...');
     }
     const moleculerConfig = createMoleculerConfig(config.cell, debug);
-    
+
     if (debug) {
         console.log('Moleculer configuration:', JSON.stringify(moleculerConfig, null, 2));
     }
@@ -193,8 +197,8 @@ export async function startCell(config, debug = false) {
     const broker = new ServiceBroker(moleculerConfig);
 
     // Get list of services to start
-    const services = _.isArray(config.cell.services) 
-        ? config.cell.services 
+    const services = _.isArray(config.cell.services)
+        ? config.cell.services
         : [config.cell.services];
 
     if (debug) {

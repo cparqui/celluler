@@ -27,4 +27,4 @@ module.exports = {
     transformIgnorePatterns: [
         'node_modules/(?!(moleculer|b4a|corestore|hypercore|hyperswarm)/)'
     ]
-}; 
+};
