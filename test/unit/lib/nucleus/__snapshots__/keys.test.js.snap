@@ -1,0 +1,11 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`keys derivation pins the derivation with known-answer vectors 1`] = `"df1f83d0c660965d07e8bcb5b514c61bd3f9c5d254557a6d79be63af6ac34d17"`;
+
+exports[`keys derivation pins the derivation with known-answer vectors 2`] = `"dc7e37b61e6a530e89330db349fc46a2b328ad82d0c2bdc7c8c310509916fcd6"`;
+
+exports[`keys derivation pins the derivation with known-answer vectors 3`] = `"0ff199a964810f3c87d9de2c42d5b5ce0ab7c4e3341bff6809a4f2029f8376ee"`;
+
+exports[`keys derivation pins the derivation with known-answer vectors 4`] = `"2c1d240149aa43aa761046d69bf8323fbb7c436f8ec2ac966b3d90e426b3a7bb"`;
+
+exports[`keys derivation pins the derivation with known-answer vectors 5`] = `"f07b07f5d6eb7e1c0b75f781c3b79f8e9d4ef039ac698fbc08e2a0545832b102"`;

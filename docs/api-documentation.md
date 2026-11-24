@@ -137,7 +137,7 @@ Returns health status of the nucleus service.
 {
   "status": "healthy|degraded",
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "cellUUID": "cell-uuid",
+  "cellId": "64-hex-character-cell-id",
   "services": {
     "store": "healthy|unavailable",
     "swarm": "healthy|unavailable", 
@@ -145,7 +145,9 @@ Returns health status of the nucleus service.
   },
   "metrics": {
     "coresCount": 2,
-    "journalLength": 100
+    "peerJournals": 1,
+    "journalLength": 100,
+    "pendingRecords": 0
   }
 }
 ```
@@ -193,45 +195,54 @@ Get information about a core.
 }
 ```
 
-##### POST /api/v1/nucleus/write
-Write data to a core.
+##### GET /api/v1/nucleus/cell-id
+Get the cell ID: the journal's Hypercore key, as 64 hex characters.
 
-**Request Body:**
-```json
-{
-  "data": { "any": "data" },
-  "name": "optional-core-name"
-}
-```
+##### GET /api/v1/nucleus/keys
+Get the currently attested keys, derived by replaying the journal. Optional `cell` reads a replicated peer.
 
 **Response:**
 ```json
 {
-  "success": true,
-  "name": "core-name",
-  "core": {
-    "discoveryKey": "...",
-    "length": 101,
-    "byteLength": 2048
-  }
+  "sign": { "publicKey": "...", "contextVersion": 1, "attestedAt": 1 },
+  "box": { "publicKey": "...", "contextVersion": 1, "attestedAt": 1 },
+  "swarm": { "publicKey": "...", "contextVersion": 1, "attestedAt": 1 }
 }
 ```
 
-##### GET /api/v1/nucleus/uuid
-Get the cell UUID.
+##### GET /api/v1/nucleus/head
+Get a `Ref` (`{ cell, index, hash }`) to the latest event. Optional `cell`.
+
+##### GET /api/v1/nucleus/events/:index
+Read one event. Optional `cell`.
+
+##### GET /api/v1/nucleus/events
+Query events.
+
+**Query Parameters:** `cell`, `type`, `hasOtherParent`, `from`, `to` (exclusive), `limit` (default 100, maximum 1000). All are optional.
+
+**Response:** `{ "events": [...], "nextIndex": 42 }`. `nextIndex` is null at the end of the range.
+
+##### GET /api/v1/nucleus/verify
+Replay a journal and check its signed head. Optional `cell`.
 
 **Response:**
 ```json
-"cell-uuid-string"
+{
+  "cell": "...",
+  "valid": true,
+  "complete": true,
+  "length": 12,
+  "verifiedLength": 12,
+  "signature": true,
+  "head": "...",
+  "keys": {},
+  "error": null
+}
 ```
 
-##### GET /api/v1/nucleus/public-key
-Get the cell's public key.
-
-**Response:**
-```json
-"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-```
+##### Local-only actions
+`registerType`, `record`, `sync`, `rotateKey`, `replicate`, `sign`, `verify`, `encrypt` and `decrypt` are not available over REST or from other nodes. Services in the same node call them through the broker (spec §5.5).
 
 #### Message Service Endpoints
 

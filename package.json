@@ -27,21 +27,25 @@
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
     "docs:serve": "cd docs && bundle exec jekyll serve",
-    "docs:build": "cd docs && bundle exec jekyll build"
+    "docs:build": "cd docs && bundle exec jekyll build",
+    "schema:build": "node scripts/build-schema.js"
   },
   "dependencies": {
     "b4a": "^1.9.0",
     "bunyan": "^1.8.15",
     "commander": "^15.0.0",
+    "compact-encoding": "^3.5.2",
     "corestore": "^7.16.1",
     "hypercore": "^11.39.6",
+    "hyperschema": "^1.26.2",
     "hyperswarm": "^4.17.2",
     "js-yaml": "^5.5.0",
     "lodash": "^4.18.1",
     "moleculer": "^0.15.2",
     "moleculer-web": "^0.11.0",
     "nats": "^2.29.3",
-    "random-access-memory": "^6.2.1"
+    "random-access-memory": "^6.2.1",
+    "sodium-universal": "^5.0.1"
   },
   "devDependencies": {
     "@babel/core": "^8.0.10",
@@ -52,6 +56,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.7",
     "globals": "^17.13.0",
+    "hyperdht": "^6.35.0",
     "jest": "^30.5.2",
     "prettier": "^3.9.10"
   }

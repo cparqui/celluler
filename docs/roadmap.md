@@ -57,19 +57,19 @@ Phases 1–4 build **NADI** (L1: network, identity, messaging, commons engine), 
 Prerequisite for any other service registering journal records or message protocols.
 
 ### 1. Keys and identity root
-- [ ] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
-- [ ] Cell ID = journal public key; replace generated UUID with a `genesis` event
-- [ ] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
-- [ ] Public `nucleus/key.add` / `nucleus/key.revoke` records
+- [x] Persist the root seed (file storage); derive signing, encryption, swarm, storage and salt keys
+- [x] Cell ID = journal Hypercore key; replace generated UUID with a `genesis` event
+- [x] Remove the per-start RSA keypair; use Ed25519 signatures and X25519 sealed boxes
+- [x] Public `nucleus/key.add` / `nucleus/key.revoke` records
 
 ### 2. Nucleus as memory manager
-- [ ] Journal as event chain: deterministic event format (decide compact-encoding vs canonical JSON)
-- [ ] One type registry; `record` with per-record visibility (private leaf or public inline)
-- [ ] Event creation owned by the Nucleus: syncs, revealed receipts, rate-limited urgent records
+- [x] Journal as event chain: deterministic compact-encoding event format
+- [ ] One type registry; `record` with per-record visibility (private leaf or public inline) (public done; private needs the private store)
+- [x] Event creation owned by the Nucleus: syncs, revealed receipts, rate-limited urgent records
 - [ ] Encrypted, mutable private store and type index
 - [ ] Salted leaf commitments; commitment root in each event
 - [ ] `record`, `query`, `prove` and `redact` actions; proof verification
-- [ ] Replace raw `write`; fix double-encoded JSON
+- [x] Replace raw `write`; fix double-encoded JSON
 
 ### 3. Reliable MessageService
 - [ ] Depend only on the Nucleus (drop identity/consensus dependencies and the fixed message-type enum)

@@ -20,7 +20,7 @@ Hashgraph (Baird, Swirlds 2016) reaches asynchronous Byzantine fault-tolerant co
 - **Virtual voting.** Every member holds the same DAG, so each computes how every other member *would* vote without any vote messages. This yields rounds, famous witnesses, and a **consensus order** of all events.
 - **Consensus timestamp.** Each event's timestamp is the median of the times members first received it, which is fair as long as honest members' clocks are roughly right.
 
-In Celluler, **a Hashgraph event is a journal event** (spec §5.2): the self-parent is the previous journal block, the other-parent is the event's `otherParent`, and the signature is the journal's Hypercore signature. A fork in a journal is exactly Hashgraph's equivocation.
+In Celluler, **a Hashgraph event is a journal event** (spec §5.2): the self-parent is the previous journal block, committed to by the event's `prev` hash, the other-parent is the event's `otherParent`, and the signature is the journal's Hypercore signature. A fork in a journal is exactly Hashgraph's equivocation.
 
 ## 2. Prior art: what Hashgraph and Hedera do not provide
 

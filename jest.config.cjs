@@ -2,12 +2,23 @@ module.exports = {
     testEnvironment: 'node',
     roots: ['<rootDir>/test'],
     moduleNameMapper: {
-        '^(\\.{1,2}/.*)\\.js$': '$1.js'
+        '^(\\.{1,2}/.*)\\.js$': '$1.js',
+        // Offline guard: every DHT node must use a loopback test bootstrap.
+        '^hyperdht$': '<rootDir>/test/helpers/guarded-hyperdht.cjs'
     },
     testTimeout: 30000,
     forceExit: true,
-    detectOpenHandles: true,
     collectCoverage: true,
+    // The CLI entry point and the MessageService (being rewritten separately) are excluded.
+    collectCoverageFrom: ['src/**/*.js', '!src/cli.js', '!src/services/message.service.js', '!src/lib/nucleus/schema/**'],
+    coverageThreshold: {
+        global: {
+            branches: 80,
+            functions: 80,
+            lines: 80,
+            statements: 80
+        }
+    },
     coverageDirectory: 'coverage',
     coverageReporters: ['text', 'lcov', 'html'],
     transform: {

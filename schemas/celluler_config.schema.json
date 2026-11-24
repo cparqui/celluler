@@ -46,6 +46,37 @@
               "type": "string",
               "description": "Path for file-based storage"
             },
+            "seed": {
+              "type": "string",
+              "pattern": "^([0-9a-fA-F]{64}|\\$\\{[^}]+\\})$",
+              "description": "Root seed as 64 hex characters, or an environment variable reference. Generated and persisted if omitted"
+            },
+            "urgentPerMinute": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum immediately published public records per minute"
+            },
+            "dht": {
+              "type": "object",
+              "properties": {
+                "bootstrap": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "oneOf": [
+                      { "type": "string", "description": "host:port" },
+                      {
+                        "type": "object",
+                        "properties": { "host": { "type": "string" }, "port": { "type": "integer" } },
+                        "required": ["host", "port"]
+                      }
+                    ]
+                  },
+                  "description": "DHT bootstrap nodes. Omit to use the public DHT"
+                }
+              },
+              "description": "DHT the cell joins"
+            },
             "encryption": {
               "type": "boolean",
               "description": "Whether to enable encryption"

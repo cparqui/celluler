@@ -1,364 +1,306 @@
-import fs from 'fs';
-import _ from "lodash";
-import { ServiceBroker } from "moleculer";
-import path from 'path';
-import { promisify } from 'util';
-import NucleusService from "../../../src/services/nucleus.service.js";
+import b4a from 'b4a';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ServiceBroker } from 'moleculer';
+import { RECORD_TYPES } from '../../../src/lib/nucleus/records/index.js';
+import NucleusService from '../../../src/services/nucleus.service.js';
+import { fixedClock, startCell, testSeed } from '../../helpers/cell.js';
+import { createTestDht } from '../../helpers/testnet.js';
 
-const rmrf = promisify(fs.rm);
-const mkdir = promisify(fs.mkdir);
-
-describe("Test 'nucleus' service", () => {
-    let broker;
-    let service;
-    const testDataDir = path.join(process.cwd(), 'tmp', 'test', 'data');
-    const testDataDir2 = path.join(process.cwd(), 'tmp', 'test', 'data2');
+describe('NucleusService', () => {
+    let testnet;
+    let cell;
+    let dir;
 
     beforeAll(async () => {
-        // Clean up any existing test data
-        try {
-            await rmrf(testDataDir, { recursive: true, force: true });
-            await rmrf(testDataDir2, { recursive: true, force: true });
-        } catch (err) {
-            // Ignore errors if directories don't exist
-        }
-
-        // Create fresh test directories
-        await mkdir(testDataDir, { recursive: true });
-        await mkdir(testDataDir2, { recursive: true });
-
-        broker = new ServiceBroker({
-            logger: false,
-            metrics: false
-        });
-
-        service = new NucleusService(broker, {
-            name: 'test-cell',
-            config: {
-                storage: 'file',
-                path: testDataDir
-            }
-        });
-
-        await broker.start();
+        testnet = await createTestDht();
     });
 
     afterAll(async () => {
-        if (broker) {
+        await testnet.destroy();
+    });
+
+    beforeEach(async () => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'celluler-nucleus-test-'));
+        cell = await startCell(testnet, { seed: testSeed(0), clock: fixedClock() });
+    });
+
+    afterEach(async () => {
+        await cell.stop();
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    describe('identity and genesis', () => {
+        it('gives a reproducible cell ID for a seed', async () => {
+            const again = await startCell(testnet, { seed: testSeed(0) });
+            const other = await startCell(testnet, { seed: testSeed(1) });
+            expect(cell.cellId).toMatch(/^[0-9a-f]{64}$/);
+            expect(again.cellId).toBe(cell.cellId);
+            expect(other.cellId).not.toBe(cell.cellId);
+            await again.stop();
+            await other.stop();
+        });
+
+        it('writes genesis with no public name, then one key attestation event', async () => {
+            const genesis = await cell.call('getEvent', { index: 0 });
+            expect(genesis.prev).toBeNull();
+            expect(genesis.public).toHaveLength(1);
+            expect(genesis.public[0].type).toBe(RECORD_TYPES.GENESIS);
+            expect(Object.keys(genesis.public[0].decoded).sort()).toEqual(['created', 'protocol']);
+            expect(genesis.public[0].decoded.protocol).toBe('celluler/1');
+
+            const keys = await cell.call('getEvent', { index: 1 });
+            expect(keys.prev).toBe(genesis.hash);
+            expect(keys.public.map((r) => r.decoded.purpose)).toEqual(['sign', 'box', 'swarm']);
+        });
+
+        it('authenticates the swarm with the attested swarm key', async () => {
+            const { swarm } = await cell.call('getAttestedKeys');
+            expect(b4a.toString(cell.service.swarm.keyPair.publicKey, 'hex')).toBe(swarm.publicKey);
+        });
+
+        it('keeps its identity and journal across a file-storage restart', async () => {
+            const first = await startCell(testnet, { seed: undefined, storage: 'file', path: dir });
+            await first.call('registerType', { type: 'test/a', owner: 'test' });
+            await first.call('record', { type: 'test/a', body: 'x', visibility: 'public', urgent: true });
+            const head = await first.call('getHead');
+            await first.stop();
+
+            const second = await startCell(testnet, { seed: undefined, storage: 'file', path: dir });
+            expect(second.cellId).toBe(first.cellId);
+            expect(await second.call('getHead')).toEqual(head);
+            await second.stop();
+        });
+
+        it('warns in memory mode', async () => {
+            const broker = new ServiceBroker({ logger: false, nodeID: 'warn-test' });
+            const service = new NucleusService(broker, {
+                config: { storage: 'memory', seed: testSeed(2), dht: { bootstrap: testnet.bootstrap } }
+            });
+            const warn = jest.spyOn(service.logger, 'warn');
+            await broker.start();
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining('will not persist'));
             await broker.stop();
-        }
+        });
 
-        // Clean up test data
-        try {
-            // Wait a bit to ensure all file handles are closed
-            await rmrf(testDataDir, { recursive: true, force: true });
-            await rmrf(testDataDir2, { recursive: true, force: true });
-        } catch (err) {
-            console.error('Error cleaning up test data:', err);
-        }
+        it('never publishes the seed', async () => {
+            const services = await cell.broker.call('$node.services', { withActions: false });
+            expect(JSON.stringify(services)).not.toContain(b4a.toString(testSeed(0), 'hex'));
+            expect(cell.service.settings.seed).toBeUndefined();
+            expect(cell.service.cellConfig.config.seed).toBeUndefined();
+        });
+
+        it('fails startup on a bad storage type or a mismatched seed', async () => {
+            await expect(startCell(testnet, { storage: 'nope' })).rejects.toThrow('Invalid storage type');
+            const first = await startCell(testnet, { seed: testSeed(4), storage: 'file', path: dir });
+            await first.stop();
+            await expect(startCell(testnet, { seed: testSeed(5), storage: 'file', path: dir }))
+                .rejects.toThrow('does not match the identity');
+        });
+
+        it('fails loudly if a cell is created without the test bootstrap', async () => {
+            const broker = new ServiceBroker({ logger: false, nodeID: 'guard-test' });
+            new NucleusService(broker, { config: { storage: 'memory', seed: testSeed(6) } });
+            await expect(broker.start()).rejects.toThrow('Offline test guard');
+        });
     });
 
-    describe("Test 'nucleus.bind' action", () => {
-        it("should bind to a new core with topic", async () => {
-            const topic = "test-topic";
-            const result = await broker.call("nucleus.bind", { topic });
-            
-            expect(result).toBeDefined();
-            expect(result.success).toBe(true);
-            expect(result.topic).toBe(topic);
-            expect(result.core).toBeDefined();
-            expect(result.core.key).toBeDefined();
+    describe('record', () => {
+        beforeEach(() => cell.call('registerType', { type: 'test/note', owner: 'test' }));
+
+        const publicNote = (over = {}) => ({ type: 'test/note', body: b4a.from('hi'), visibility: 'public', ...over });
+
+        it('rejects an unregistered type', async () => {
+            await expect(cell.call('record', publicNote({ type: 'test/other' }))).rejects.toThrow('Unregistered');
         });
 
-        it("should bind to existing core with key", async () => {
-            const topic = "test-topic";
-            const firstResult = await broker.call("nucleus.bind", { topic });
-            const key = firstResult.core.key;
-            
-            const result = await broker.call("nucleus.bind", { topic, key });
-            expect(result.success).toBe(true);
-            expect(result.core.key).toBe(key);
+        it('rejects callers writing Nucleus key records', async () => {
+            await expect(cell.call('record', publicNote({ type: RECORD_TYPES.KEY_ADD }))).rejects.toThrow('Unregistered');
+            await expect(cell.call('registerType', { type: 'nucleus/x', owner: 'evil' })).rejects.toThrow('reserved');
         });
 
-        it("should reject with ValidationError for missing topic", async () => {
-            expect.assertions(1);
-            try {
-                await broker.call("nucleus.bind", {});
-            } catch (err) {
-                expect(err.name).toBe("ValidationError");
+        it('returns not-implemented for private records', async () => {
+            await expect(cell.call('record', publicNote({ visibility: 'private' }))).rejects.toMatchObject({
+                code: 501,
+                type: 'NOT_IMPLEMENTED'
+            });
+        });
+
+        it('queues a public record until the next event', async () => {
+            const before = (await cell.call('getHead')).index;
+            const result = await cell.call('record', publicNote());
+            expect(result.event).toBeNull();
+            expect((await cell.call('getHead')).index).toBe(before);
+            expect((await cell.call('health')).metrics.pendingRecords).toBe(1);
+        });
+
+        it('publishes an urgent record with everything pending', async () => {
+            await cell.call('record', publicNote({ body: 'one' }));
+            const { event } = await cell.call('record', publicNote({ body: 'two', urgent: true }));
+            const stored = await cell.call('getEvent', { index: event.index });
+            expect(stored.public.map((r) => b4a.toString(b4a.from(r.body, 'hex')))).toEqual(['one', 'two']);
+        });
+
+        it('rate-limits urgent records without losing them', async () => {
+            const limited = await startCell(testnet, { seed: testSeed(7), urgentPerMinute: 1 });
+            await limited.call('registerType', { type: 'test/note', owner: 'test' });
+            expect((await limited.call('record', publicNote({ urgent: true }))).event).not.toBeNull();
+            const second = await limited.call('record', publicNote({ urgent: true }));
+            expect(second).toMatchObject({ event: null, rateLimited: true });
+            expect((await limited.call('health')).metrics.pendingRecords).toBe(1);
+            await limited.stop();
+        });
+
+        it('starts a new event when pending records would exceed 8 KB', async () => {
+            const start = (await cell.call('getHead')).index;
+            for (let i = 0; i < 9; i++) {
+                await cell.call('record', publicNote({ body: b4a.alloc(1024, i) }));
+            }
+            expect((await cell.call('getHead')).index).toBe(start + 1);
+        });
+
+        it('rejects an oversized body and bad refs', async () => {
+            await expect(cell.call('record', publicNote({ body: b4a.alloc(1025) }))).rejects.toThrow('exceeds');
+            await expect(cell.call('record', publicNote({ body: 42 }))).rejects.toThrow('bytes');
+            await expect(
+                cell.call('record', publicNote({ refs: [{ cell: 'bad', index: 0, hash: 'bad' }] }))
+            ).rejects.toThrow('refs[0].cell');
+        });
+
+        it('flushes queued records on clean stop', async () => {
+            const first = await startCell(testnet, { seed: undefined, storage: 'file', path: dir });
+            await first.call('registerType', { type: 'test/note', owner: 'test' });
+            await first.call('record', publicNote());
+            await first.stop();
+            const second = await startCell(testnet, { seed: undefined, storage: 'file', path: dir });
+            const { events } = await second.call('query', { type: 'test/note' });
+            expect(events).toHaveLength(1);
+            await second.stop();
+        });
+
+        it('allows a nucleus/profile record and handles type ownership', async () => {
+            await expect(cell.call('record', publicNote({ type: RECORD_TYPES.PROFILE }))).resolves.toBeDefined();
+            await expect(cell.call('registerType', { type: 'test/note', owner: 'test' })).resolves.toBeDefined();
+            await expect(cell.call('registerType', { type: 'test/note', owner: 'other' })).rejects.toThrow('owned by');
+            await expect(cell.call('registerType', { type: 'Bad', owner: 'x' })).rejects.toThrow('Invalid type');
+        });
+    });
+
+    describe('reading', () => {
+        it('reads events by index and rejects unknown ones', async () => {
+            expect((await cell.call('getEvent', { index: 1 })).index).toBe(1);
+            await expect(cell.call('getEvent', { index: 99 })).rejects.toThrow('does not exist');
+        });
+
+        it('queries by type, range and limit with pagination', async () => {
+            await cell.call('registerType', { type: 'test/q', owner: 'test' });
+            for (let i = 0; i < 3; i++) {
+                await cell.call('record', { type: 'test/q', body: `${i}`, visibility: 'public', urgent: true });
+            }
+            expect((await cell.call('query', { type: 'test/q' })).events.map((e) => e.index)).toEqual([2, 3, 4]);
+            expect((await cell.call('query', { from: 1, to: 3 })).events.map((e) => e.index)).toEqual([1, 2]);
+            const page = await cell.call('query', { type: 'test/q', limit: 2 });
+            expect(page.events).toHaveLength(2);
+            expect((await cell.call('query', { type: 'test/q', from: page.nextIndex })).events).toHaveLength(1);
+            expect((await cell.call('query', { hasOtherParent: true })).events).toHaveLength(0);
+        });
+
+        it('reports health', async () => {
+            const health = await cell.call('health');
+            expect(health).toMatchObject({ status: 'healthy', cellId: cell.cellId });
+            expect(health.metrics.journalLength).toBe(2);
+        });
+
+        it('verifies its own journal', async () => {
+            const report = await cell.call('verifyJournal');
+            expect(report).toMatchObject({ valid: true, signature: true, length: 2, error: null });
+        });
+
+        it('errors for a journal that is not replicated', async () => {
+            const unknown = 'ab'.repeat(32);
+            await expect(cell.call('getHead', { cell: unknown })).rejects.toThrow('not replicated');
+            await expect(cell.call('getEvent', { index: 0, cell: unknown })).rejects.toThrow('not replicated');
+        });
+    });
+
+    describe('access control', () => {
+        it('marks write and secret-key actions as local-only', () => {
+            const actions = cell.service.schema.actions;
+            for (const name of ['registerType', 'record', 'sync', 'replicate', 'sign', 'verify', 'encrypt', 'decrypt']) {
+                expect(actions[name].visibility).toBe('protected');
             }
         });
 
-        it("should reject with error for discovery key mismatch", async () => {
-            const topic = "test-topic";
-            await broker.call("nucleus.bind", { topic });
-            
-            expect.assertions(1);
-            try {
-                await broker.call("nucleus.bind", { topic, key: "invalid-key" });
-            } catch (err) {
-                expect(err.message).toContain("Discovery key mismatch");
+        it('has removed the old actions', async () => {
+            for (const name of ['write', 'getUUID', 'getPublicKey', 'emit']) {
+                await expect(cell.call(name, {})).rejects.toThrow();
             }
         });
     });
 
-    describe("Test 'nucleus.get' action", () => {
-        it("should get journal core by default", async () => {
-            const result = await broker.call("nucleus.get");
-            
-            expect(result).toBeDefined();
-            expect(result.name).toBe("journal");
-            expect(result.core).toBeDefined();
+    describe('named cores', () => {
+        it('binds and reads a named core', async () => {
+            const bound = await cell.call('bind', { topic: 'test-topic' });
+            expect(bound).toMatchObject({ success: true, topic: 'test-topic' });
+            const again = await cell.call('bind', { topic: 'test-topic', key: bound.core.key });
+            expect(again.core.key).toBe(bound.core.key);
+            const got = await cell.call('get', { name: 'test-topic' });
+            expect(got.core.key).toBe(bound.core.key);
         });
 
-        it("should get specific core by name", async () => {
-            const name = "test-core";
-            await broker.call("nucleus.bind", { topic: name });
-            
-            const result = await broker.call("nucleus.get", { name });
-            expect(result.name).toBe(name);
-            expect(result.core).toBeDefined();
+        it('rejects a discovery key mismatch and a missing topic', async () => {
+            await expect(cell.call('bind', { topic: 't', key: 'invalid' })).rejects.toThrow('Discovery key mismatch');
+            await expect(cell.call('bind', {})).rejects.toMatchObject({ name: 'ValidationError' });
         });
 
-        it("should get core by key", async () => {
-            const topic = "test-core";
-            const bindResult = await broker.call("nucleus.bind", { topic });
-            const key = bindResult.core.publicKey;
-            
-            const result = await broker.call("nucleus.get", { key });
-            expect(result.core.publicKey).toBe(key);
+        it('refuses to bind the journal', async () => {
+            await expect(cell.call('bind', { topic: 'journal' })).rejects.toThrow('cannot be bound');
         });
 
-        it("should handle errors when getting non-existent core", async () => {
-            expect.assertions(1);
-            try {
-                await broker.call("nucleus.get", { name: "non-existent" });
-                fail("Expected an error to be thrown");
-            } catch (err) {
-                expect(err).toBeDefined();
-            }
+        it('returns journal metadata by default, by name and by key', async () => {
+            expect((await cell.call('get')).name).toBe('journal');
+            expect((await cell.call('get', { name: 'journal' })).core.length).toBe(2);
+            expect((await cell.call('get', { key: cell.cellId })).name).toBe('journal');
+        });
+
+        it('gets a core by key and rejects a malformed key', async () => {
+            const key = 'cd'.repeat(32);
+            expect((await cell.call('get', { key })).name).toBe(key);
+            await expect(cell.call('get', { key: 'nope' })).rejects.toThrow('64 lowercase hex');
         });
     });
 
-    describe("Test 'nucleus.write' action", () => {
-        it("should write to journal core by default", async () => {
-            const data = { test: "data" };
-            const result = await broker.call("nucleus.write", { data });
-            
-            expect(result).toBeDefined();
-            expect(result.success).toBe(true);
-            expect(result.name).toBe("journal");
-            expect(result.core).toBeDefined();
-        });
-
-        it("should write to specific core", async () => {
-            const name = "test-write-core";
-            await broker.call("nucleus.bind", { topic: name });
-            
-            const data = { test: "data" };
-            const result = await broker.call("nucleus.write", { name, data });
-            
-            expect(result.success).toBe(true);
-            expect(result.name).toBe(name);
-        });
-
-        it("should reject with ValidationError for missing data", async () => {
-            expect.assertions(1);
-            try {
-                await broker.call("nucleus.write", {});
-            } catch (err) {
-                expect(err.name).toBe("ValidationError");
-            }
-        });
-
-        it("should handle errors when writing to non-existent core", async () => {
-            expect.assertions(1);
-            try {
-                await broker.call("nucleus.write", { name: "non-existent", data: { test: "data" } });
-                fail("Expected an error to be thrown");
-            } catch (err) {
-                expect(err).toBeDefined();
-            }
-        });
-    });
-
-    describe("Test service lifecycle", () => {
-        it("should handle file storage initialization", async () => {
-            expect(service.store).toBeDefined();
-
-        });
-
-        it("should handle invalid storage type", async () => {
-            const invalidService = new NucleusService(broker, {
-                config: {
-                    storage: 'invalid'
+    describe('lifecycle', () => {
+        it('emits the cell ID in started and stopped events', async () => {
+            const received = {};
+            const broker = new ServiceBroker({ logger: false, nodeID: 'events-test' });
+            broker.createService({
+                name: 'listener',
+                events: {
+                    'nucleus.started': (ctx) => { received.started = ctx.params; },
+                    'nucleus.stopped': (ctx) => { received.stopped = ctx.params; }
                 }
             });
-            expect(invalidService.store).toBeUndefined();
+            new NucleusService(broker, {
+                config: { storage: 'memory', seed: testSeed(8), dht: { bootstrap: testnet.bootstrap } }
+            });
+            await broker.start();
+            const cellId = await broker.call('nucleus.getCellId');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            expect(received.started).toEqual({ cellId });
+            await broker.stop();
+            expect(received.stopped).toEqual({ cellId });
         });
 
-        it("should handle initialization errors gracefully", async () => {
-            const errorService = new NucleusService(broker, {
-                config: {
-                    storage: 'file' // Missing path should cause error
-                }
-            });
-            expect(errorService.store).toBeUndefined();
+        it('releases resources on stop', async () => {
+            const stopped = await startCell(testnet, { seed: testSeed(9) });
+            await stopped.call('bind', { topic: 'cleanup' });
+            await stopped.stop();
+            expect(stopped.service.cores).toEqual({});
+            expect(stopped.service.swarm).toBeNull();
+            expect(stopped.service.store).toBeNull();
+            expect(() => stopped.service.cellId).toThrow('not started');
         });
     });
-
-    // Disabled event tests for now
-    describe.skip("Test core events", () => {
-        it("should emit 'core.ready' event when core is created", async () => {
-            const topic = "test-event-core";
-            const eventSpy = jest.spyOn(broker, "emit");
-
-            await broker.call("nucleus.bind", { topic });
-
-            expect(eventSpy).toHaveBeenCalledWith(
-                "core.ready",
-                expect.objectContaining({
-                    name: topic,
-                    core: expect.objectContaining({
-                        publicKey: expect.any(String)
-                    })
-                })
-            );
-        });
-    });
-
-    describe("Test cell UUID", () => {
-        it("should generate and return a valid UUID", async () => {
-            // Ensure journal is initialized
-            await broker.call("nucleus.write", { data: { test: "data" } });
-            const result = await broker.call("nucleus.getUUID");
-            expect(result).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-        });
-
-        it("should return the same UUID on subsequent calls", async () => {
-            // Ensure journal is initialized
-            await broker.call("nucleus.write", { data: { test: "data" } });
-            const uuid1 = await broker.call("nucleus.getUUID");
-            await broker.call("nucleus.write", { data: { test: "more data" } });
-            const uuid2 = await broker.call("nucleus.getUUID");
-            expect(uuid1).toBe(uuid2);
-        });
-
-        it("should generate different UUIDs for different cells", async () => {
-            // Ensure journal is initialized for first cell
-            await broker.call("nucleus.write", { data: { test: "data" } });
-            const uuid1 = await broker.call("nucleus.getUUID");
-
-            // Create a second service with different config
-            const broker2 = new ServiceBroker({ logger: false });
-            const service2 = new NucleusService(broker2, {
-                name: 'different-cell',
-                config: {
-                    storage: 'file',
-                    path: './tmp/test/data2',
-                }
-            });
-
-            // Initialize the second service
-            await broker2.start();
-
-            // Initialize journal for second cell
-            await broker2.call("nucleus.write", { data: { test: "data" } });
-            const uuid2 = await broker2.call("nucleus.getUUID");
-            
-            expect(uuid1).not.toBe(uuid2);
-            
-            // Clean up second service
-            await service2.schema.stopped.call(service2);
-            await broker2.stop();
-        });
-    });
-
-    describe("Test cell key pair", () => {
-        it("should generate and return a valid public key", async () => {
-            const publicKey = await broker.call("nucleus.getPublicKey");
-            expect(publicKey).toMatch(/^-----BEGIN PUBLIC KEY-----/);
-        }, 10000);
-
-        it("should be able to encrypt and decrypt messages between cells", async () => {
-            // Create a second service with different config
-            const broker2 = new ServiceBroker({ logger: false });
-            const service2 = new NucleusService(broker2, {
-                name: 'different-cell',
-                config: {
-                    storage: 'file',
-                    path: './tmp/test/data2',
-                }
-            });
-
-            await broker2.start();
-
-            // Get public keys
-            const publicKey1 = await broker.call("nucleus.getPublicKey");
-            const publicKey2 = await broker2.call("nucleus.getPublicKey");
-
-            // Test message exchange
-            const message = "Hello from cell 1";
-            const encrypted = await service.encryptForCell(publicKey2, message);
-            const decrypted = await service2.decryptFromCell(publicKey1, encrypted);
-
-            expect(decrypted).toBe(message);
-            await broker2.stop();
-        }, 15000);
-
-        it("should reject messages with invalid signatures", async () => {
-            // Create a second service
-            const broker2 = new ServiceBroker({ logger: false });
-            const service2 = new NucleusService(broker2, {
-                name: 'different-cell',
-                config: {
-                    storage: 'file',
-                    path: './tmp/test/data2',
-                }
-            });
-
-            await broker2.start();
-
-            // Get public keys
-            const publicKey1 = await broker.call("nucleus.getPublicKey");
-            const publicKey2 = await broker2.call("nucleus.getPublicKey");
-
-            // Create a tampered message
-            const message = "Hello from cell 1";
-            const encrypted = await service.encryptForCell(publicKey2, message);
-            encrypted.signature = 'invalid-signature';
-
-            await expect(service2.decryptFromCell(publicKey1, encrypted))
-                .rejects.toThrow('Invalid signature');
-
-            await broker2.stop();
-        }, 15000);
-    });
-
-    describe("Test cleanup", () => {
-        it("should clean up resources on stop", async () => {
-            // Create a second broker and service
-            const broker2 = new ServiceBroker({ logger: false });
-            const cleanupService = new NucleusService(broker2, {
-                config: {
-                    storage: 'file',
-                    path: './tmp/test/data2'
-                }
-            });
-            
-            await broker2.start();
-            
-            // Create some cores
-            await broker2.call("nucleus.bind", { topic: "cleanup-test" });
-            await broker2.call("nucleus.write", { data: { test: "data" } });
-            
-            // Stop the service
-            await broker2.stop();
-            
-            // Verify cleanup
-            expect(cleanupService.cores).toEqual({});
-            expect(cleanupService.swarm).toBeNull();
-            expect(cleanupService.store).toBeNull();
-        });
-    });
-}); 
+});
