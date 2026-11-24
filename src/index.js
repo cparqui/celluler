@@ -125,7 +125,7 @@ export async function loadConfig(configPath) {
 
         return resolvedConfig;
     } catch (err) {
-        throw new Error(`Error loading configuration: ${err.message}`);
+        throw new Error(`Error loading configuration: ${err.message}`, { cause: err });
     }
 }
 

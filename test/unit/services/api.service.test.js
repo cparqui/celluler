@@ -13,7 +13,6 @@ describe('ApiService', () => {
     let broker;
     let testnet;
     let apiService;
-    let nucleusService;
     const testDataDir = path.join(process.cwd(), 'tmp', 'test', 'data');
 
     beforeAll(async () => {
@@ -21,7 +20,7 @@ describe('ApiService', () => {
         // Clean up any existing test data
         try {
             await rmrf(testDataDir, { recursive: true, force: true });
-        } catch (err) {
+        } catch {
             // Ignore errors if directories don't exist
         }
 
@@ -33,7 +32,7 @@ describe('ApiService', () => {
             metrics: false
         });
 
-        nucleusService = new NucleusService(broker, {
+        new NucleusService(broker, {
             name: 'test-cell',
             config: {
                 storage: 'file',

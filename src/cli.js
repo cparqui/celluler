@@ -2,7 +2,6 @@
 
 import { program } from 'commander';
 import { startCell, loadConfig, redactConfig, DEFAULT_CONFIG } from './index.js';
-import _ from 'lodash';
 
 program
     .name('cell')
@@ -85,11 +84,7 @@ program
                 }
 
                 // Global debug logging
-                if (typeof config.cell.logger.options === 'array') {
-                    Object.keys(config.cell.logger).forEach((logger) => {
-                        logger.options.level = logLevel;
-                    });
-                } else if (typeof config.cell.logger.options === 'object' ) {
+                if (typeof config.cell.logger.options === 'object') {
                     config.cell.logger.options.level = logLevel;
                 } else {
                     config.cell.logger.options = { level: logLevel };
