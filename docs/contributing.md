@@ -33,7 +33,7 @@ git checkout -b feature/your-feature-name
 ### Dependencies
 
 - Every version range in `package.json`, including `overrides`, must have a floor (the lowest version it allows) published at least 14 days ago. That way the project still installs from a registry or mirror that is two weeks behind. Ranges may allow newer versions, and npm installs the newest match as usual.
-- No lockfile is committed (`package-lock.json` is ignored).
+- No lockfile is committed (`package-lock.json` is ignored). npm still writes one locally, and it keeps reusing the versions recorded there even after `overrides` change. After pulling a change to `overrides`, run `rm -rf node_modules package-lock.json && npm install`.
 - When `npm audit` reports a vulnerable transitive dependency that its parent hasn't updated yet, add a scoped entry to `overrides` in `package.json` whose floor is a patched version, such as `"glob@>=9.0.0 <14.0.2": "^14.0.4"`. Scope the key to the vulnerable range so other major versions in the tree are left alone. Remove the entry once the parent packages depend on a fixed version.
 
 ## Development Workflow
@@ -187,10 +187,13 @@ npm run build
 ### Testing
 
 ```bash
-npm test              # Run all tests
-npm run test:unit     # Run unit tests
-npm run test:integration  # Run integration tests
+npm test                    # Run all tests and check the 80% coverage threshold
+npm test -- --coverage=false test/unit         # Run only the unit tests
+npm test -- --coverage=false test/integration  # Run only the integration tests
+npm run test:watch          # Re-run tests on change
 ```
+
+Jest runs the ES modules natively, without Babel, so it needs Node's `--experimental-vm-modules` flag. The `npm test` script passes it; running `npx jest` directly fails with "Must use import to load ES Module". In test files, import the `jest` object from `@jest/globals` (`describe`, `it` and `expect` are still globals).
 
 ### Linting
 

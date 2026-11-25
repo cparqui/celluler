@@ -1,6 +1,6 @@
 import b4a from 'b4a';
+import { EventFormatError } from '../../../../src/lib/nucleus/errors.js';
 import {
-    EventFormatError,
     MAX_EVENT_PUBLIC_BYTES,
     MAX_RECORD_BODY_BYTES,
     assertRef,

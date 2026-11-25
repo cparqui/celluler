@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import fs from 'fs';
 import { ServiceBroker } from 'moleculer';
 import path from 'path';

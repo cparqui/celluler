@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import b4a from 'b4a';
 import Corestore from 'corestore';
 import Hyperswarm from 'hyperswarm';
