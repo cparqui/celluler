@@ -33,7 +33,7 @@ git checkout -b feature/your-feature-name
 ### Dependencies
 
 - Every version range in `package.json`, including `overrides`, must have a floor (the lowest version it allows) published at least 14 days ago. That way the project still installs from a registry or mirror that is two weeks behind. Ranges may allow newer versions, and npm installs the newest match as usual.
-- No lockfile is committed (`package-lock.json` is ignored).
+- No lockfile is committed (`package-lock.json` is ignored). npm still writes one locally, and it keeps reusing the versions recorded there even after `overrides` change. After pulling a change to `overrides`, run `rm -rf node_modules package-lock.json && npm install`.
 - When `npm audit` reports a vulnerable transitive dependency that its parent hasn't updated yet, add a scoped entry to `overrides` in `package.json` whose floor is a patched version, such as `"glob@>=9.0.0 <14.0.2": "^14.0.4"`. Scope the key to the vulnerable range so other major versions in the tree are left alone. Remove the entry once the parent packages depend on a fixed version.
 
 ## Development Workflow
