@@ -9,8 +9,8 @@ module.exports = {
     testTimeout: 30000,
     forceExit: true,
     collectCoverage: true,
-    // The CLI entry point and the MessageService (being rewritten separately) are excluded.
-    collectCoverageFrom: ['src/**/*.js', '!src/cli.js', '!src/services/message.service.js', '!src/lib/nucleus/schema/**'],
+    // The CLI entry point and the generated encodings are excluded.
+    collectCoverageFrom: ['src/**/*.js', '!src/cli.js', '!src/lib/nucleus/schema/**'],
     coverageThreshold: {
         global: {
             branches: 80,

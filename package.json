@@ -44,7 +44,6 @@
     "moleculer": "^0.15.2",
     "moleculer-web": "^0.11.0",
     "nats": "^2.29.3",
-    "random-access-memory": "^6.2.1",
     "sodium-universal": "^5.0.1"
   },
   "devDependencies": {
