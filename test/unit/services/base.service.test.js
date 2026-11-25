@@ -1,5 +1,5 @@
-import { ServiceBroker, Service } from "moleculer";
-import BaseService from "../../../src/services/base.service.js";
+import { ServiceBroker, Service } from 'moleculer';
+import BaseService from '../../../src/services/base.service.js';
 
 describe("Test 'base' service", () => {
     let broker = new ServiceBroker({ logger: false });
@@ -16,8 +16,8 @@ describe("Test 'base' service", () => {
         }
     });
 
-    describe("Test constructor", () => {
-        it("should initialize with default configuration", () => {
+    describe('Test constructor', () => {
+        it('should initialize with default configuration', () => {
             expect(service.cellConfig).toBeDefined();
             expect(service.cellConfig.storage).toBe('file');
             expect(service.cellConfig.path).toBe('./data');
@@ -26,7 +26,7 @@ describe("Test 'base' service", () => {
             expect(service.cellConfig.replication).toBe(true);
         });
 
-        it("should accept custom configuration", () => {
+        it('should accept custom configuration', () => {
             const customConfig = {
                 storage: 'memory',
                 path: './custom',
@@ -39,14 +39,14 @@ describe("Test 'base' service", () => {
         });
     });
 
-    describe("Test service inheritance", () => {
-        it("should be an instance of Moleculer Service", () => {
+    describe('Test service inheritance', () => {
+        it('should be an instance of Moleculer Service', () => {
             expect(service).toBeInstanceOf(Service);
         });
 
-        it("should have access to broker instance", () => {
+        it('should have access to broker instance', () => {
             expect(service.broker).toBeDefined();
             expect(service.broker).toBe(broker);
         });
     });
-}); 
+});

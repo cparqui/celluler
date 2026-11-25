@@ -14,4 +14,4 @@ export default class BaseService extends Service {
         super(broker);
         this.cellConfig = cellConfig;
     }
-} 
+}

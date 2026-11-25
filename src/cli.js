@@ -2,7 +2,6 @@
 
 import { program } from 'commander';
 import { startCell, loadConfig, redactConfig, DEFAULT_CONFIG } from './index.js';
-import _ from 'lodash';
 
 program
     .name('cell')
@@ -24,7 +23,7 @@ program
     .action(async (options) => {
         try {
             console.log('Starting cell with options:', options);
-            
+
             let config;
             if (options.config) {
                 console.log('Loading config from:', options.config);
@@ -41,10 +40,10 @@ program
             }
 
             // Get services from either CLI or environment variable
-            const services = options.services 
-                ? options.services.split(',').map(s => s.trim())
-                : (process.env.CELL_SERVICES ? process.env.CELL_SERVICES.split(',').map(s => s.trim()) : ['nucleus']);
-            
+            const services = options.services
+                ? options.services.split(',').map((s) => s.trim())
+                : (process.env.CELL_SERVICES ? process.env.CELL_SERVICES.split(',').map((s) => s.trim()) : ['nucleus']);
+
             console.log('Services to start:', services);
 
             // Apply command line overrides
@@ -56,7 +55,7 @@ program
             if (options.logLevel) {
                 if (typeof config.cell.logger.options.level === 'object') {
                     // Set all module levels to the specified level
-                    Object.keys(config.cell.logger.options.level).forEach(key => {
+                    Object.keys(config.cell.logger.options.level).forEach((key) => {
                         config.cell.logger.options.level[key] = options.logLevel;
                     });
                 } else {
@@ -69,27 +68,23 @@ program
             if (options.dhtBootstrap) {
                 config.cell.config = {
                     ...config.cell.config,
-                    dht: { bootstrap: options.dhtBootstrap.split(',').map(node => node.trim()) }
+                    dht: { bootstrap: options.dhtBootstrap.split(',').map((node) => node.trim()) }
                 };
             }
 
             // Handle debug logging
             if (options.debug) {
-                let logLevel = "debug";
+                let logLevel = 'debug';
                 if (typeof options.debug === 'string') {
                     // Module-specific debugging
                     logLevel = {
-                        [options.debug.toUpperCase()]: "debug",
-                        "**": "info"  // Default level for other modules
+                        [options.debug.toUpperCase()]: 'debug',
+                        '**': 'info' // Default level for other modules
                     };
                 }
-                
+
                 // Global debug logging
-                if (typeof config.cell.logger.options === 'array') {
-                    Object.keys(config.cell.logger).forEach(logger => {
-                        logger.options.level = logLevel;
-                    });
-                } else if (typeof config.cell.logger.options === 'object' ) {
+                if (typeof config.cell.logger.options === 'object') {
                     config.cell.logger.options.level = logLevel;
                 } else {
                     config.cell.logger.options = { level: logLevel };
@@ -102,9 +97,9 @@ program
             console.log('Starting cell...');
 
             const broker = await startCell(config, options.debug);
-            
+
             console.log('Cell started successfully');
-            
+
             // Handle process termination
             process.on('SIGINT', async () => {
                 console.log('Shutting down cell...');
@@ -117,4 +112,4 @@ program
         }
     });
 
-program.parse(); 
+program.parse();

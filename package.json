@@ -23,9 +23,9 @@
     "test:coverage:html": "jest --coverage --coverageReporters=html",
     "test:coverage:watch": "jest --coverage --watch",
     "test:coverage:threshold": "jest --coverage --coverageThreshold='{\"global\":{\"branches\":80,\"functions\":80,\"lines\":80,\"statements\":80}}'",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "format": "prettier --write src",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "eslint . --fix",
     "docs:serve": "cd docs && bundle exec jekyll serve",
     "docs:build": "cd docs && bundle exec jekyll build",
     "schema:build": "node scripts/build-schema.js"
@@ -44,20 +44,17 @@
     "moleculer": "^0.15.2",
     "moleculer-web": "^0.11.0",
     "nats": "^2.29.3",
-    "random-access-memory": "^6.2.1",
     "sodium-universal": "^5.0.1"
   },
   "devDependencies": {
     "@babel/core": "^8.0.10",
     "@babel/preset-env": "^8.0.7",
     "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
     "babel-jest": "^30.5.2",
     "eslint": "^10.14.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.7",
     "globals": "^17.13.0",
     "hyperdht": "^6.35.0",
-    "jest": "^30.5.2",
-    "prettier": "^3.9.10"
+    "jest": "^30.5.2"
   }
 }

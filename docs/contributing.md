@@ -45,7 +45,9 @@ git checkout -b feature/your-feature-name
 - Follow TypeScript best practices
 - Use meaningful variable and function names
 - Add appropriate comments and documentation
-- Follow the existing code style
+- Follow the existing code style: 4-space indent, single quotes, semicolons, no trailing commas, and lines up to 120 columns
+
+`npm run lint` checks these conventions with ESLint. The rules describe how the code is already written, so if a rule and the codebase disagree, raise it rather than reformatting around it. Style-only changes belong in their own PR.
 
 ### 3. Testing
 
