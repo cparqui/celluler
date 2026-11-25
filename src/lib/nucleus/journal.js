@@ -45,15 +45,26 @@ export class Journal {
     #state;
     #clock;
     #urgentPerMinute;
+    #onCommit;
     #pending = [];
     #urgentTimes = [];
     #tail = Promise.resolve();
 
-    constructor(core, state, { clock = Date.now, urgentPerMinute = DEFAULT_URGENT_PER_MINUTE } = {}) {
+    /**
+     * @param {object} [opts]
+     * @param {(commit: { index, hash, records, otherParent }) => void} [opts.onCommit]
+     *   Called after each event is appended, for logging. It must not throw.
+     */
+    constructor(
+        core,
+        state,
+        { clock = Date.now, urgentPerMinute = DEFAULT_URGENT_PER_MINUTE, onCommit = null } = {}
+    ) {
         this.#core = core;
         this.#state = state;
         this.#clock = clock;
         this.#urgentPerMinute = urgentPerMinute;
+        this.#onCommit = onCommit;
     }
 
     /** Replays an existing journal, or writes genesis to an empty one. */
@@ -149,7 +160,9 @@ export class Journal {
         await this.#core.append(block);
         this.#state = next;
         this.#pending = [];
-        return { index: next.length - 1, hash: b4a.from(hash) };
+        const committed = { index: next.length - 1, hash: b4a.from(hash) };
+        this.#onCommit?.({ ...committed, records, otherParent });
+        return committed;
     }
 
     #serialize(task) {

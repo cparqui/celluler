@@ -139,6 +139,29 @@ git checkout -b feature/your-feature-name
 - Include code examples
 - Document edge cases
 
+### 4. Logging
+
+Use Pino's call style: an optional context object first, then the message. Keep the message a fixed phrase with no values in it, so lines are easy to search, and put errors under `err`:
+
+```js
+this.logger.info({ cellId, journalLength }, 'Nucleus started');
+this.logger.error({ err }, 'Failed to flush journal');
+this.logger.debug('Corestore closed');
+```
+
+With the Pino logger, each line is one JSON object: the context becomes top-level fields, the message goes in `msg`, and `err` is serialized with its type, message and stack. Arguments after the message only fill `%s`-style placeholders in it (otherwise Pino drops them), so put values in the context object instead.
+
+Choose the level by how often it happens and who needs it:
+
+| Level | Use for | Nucleus examples |
+|---|---|---|
+| `error` | Faults that need someone to look: unexpected exceptions, local corruption, failed cleanup | `Action failed`, `Failed to start Nucleus`, own journal failed verification |
+| `warn` | Something wrong that the cell survived, often caused by a peer | Rejected peer journal, replication timed out, peer reference mismatch, memory storage |
+| `info` | Startup, shutdown and rare state changes: a production log should read as a short story | Nucleus started/stopped, new cell journal, keys attested or rotated, record type registered, topic bound, new peer journal tracked |
+| `debug` | Per-operation detail for watching the system work: every journal append and read, peer connections, rejected input | `Appended journal event`, `Read journal event`, `Peer connected`, `Action rejected` |
+
+Never log the root seed, secret keys, record bodies, messages or ciphertext. Cell IDs, public keys, hashes and record types are fine.
+
 ## Project Structure
 
 ```

@@ -1,24 +1,26 @@
 cell:
   id: "cell-1"
   name: "Example Cell"
-
-logging:
-  type: "Bunyan"
-  options:
-    level: "info"
-    bunyan:
-      name: "cell-1"
-      streams:
-        - level: "info"
-          path: "logs/cell-1.log"
-          type: "rotating-file"
-        - level: "error"
-          path: "logs/cell-1-error.log"
-          type: "rotating-file"
-      serializers:
-        err: "bunyan.stdSerializers.err"
-        req: "bunyan.stdSerializers.req"
-        res: "bunyan.stdSerializers.res"
+  logger:
+    type: "Pino"
+    options:
+      level: "info"
+      pino:
+        # Passed to pino(): https://getpino.io/#/docs/api?id=options
+        options:
+          name: "cell-1"
+          transport:
+            targets:
+              - target: "pino/file"
+                level: "info"
+                options:
+                  destination: "logs/cell-1.log"
+                  mkdir: true
+              - target: "pino/file"
+                level: "error"
+                options:
+                  destination: "logs/cell-1-error.log"
+                  mkdir: true
 
 transporter:
   type: "NATS"

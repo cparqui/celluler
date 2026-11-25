@@ -82,7 +82,7 @@ const DEFAULT_SETTINGS = {
 
     // Error handlers
     onError(req, res, err) {
-        this.logger.error('API Gateway error:', err);
+        this.logger.error({ err }, 'API Gateway error');
         res.setHeader('Content-Type', 'application/json');
         res.writeHead(err.code || 500);
         res.end(JSON.stringify({
@@ -211,7 +211,7 @@ export default class ApiService extends Service {
 
             return health;
         } catch (error) {
-            this.logger.error('Health check failed:', error);
+            this.logger.error({ err: error }, 'Health check failed');
             return {
                 status: 'unhealthy',
                 timestamp: new Date().toISOString(),
@@ -246,7 +246,7 @@ export default class ApiService extends Service {
                 }))
             };
         } catch (error) {
-            this.logger.error('Status check failed:', error);
+            this.logger.error({ err: error }, 'Status check failed');
             throw error;
         }
     }

@@ -130,7 +130,7 @@ describe('ApiService', () => {
             // Call the error handler from settings
             apiService.settings.onError.call(apiService, req, res, err);
 
-            expect(apiService.logger.error).toHaveBeenCalledWith('API Gateway error:', err);
+            expect(apiService.logger.error).toHaveBeenCalledWith({ err }, 'API Gateway error');
             expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/json');
             expect(res.writeHead).toHaveBeenCalledWith(400);
             expect(res.end).toHaveBeenCalledWith(JSON.stringify({
