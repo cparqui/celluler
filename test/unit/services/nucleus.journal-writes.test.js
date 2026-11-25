@@ -139,7 +139,12 @@ describe('journal writes', () => {
                 const journal = await Journal.open(core, { clock: () => 1000 });
                 const record = { type: 'test/x', ts: 1, refs: [], body: b4a.from('keep') };
                 await journal.write([record]);
-                const bad = { type: RECORD_TYPES.KEY_REVOKE, ts: 1, refs: [], body: encodeBody(RECORD_TYPES.KEY_REVOKE, { publicKey: b4a.alloc(32, 9), reason: null }) };
+                const bad = {
+                    type: RECORD_TYPES.KEY_REVOKE,
+                    ts: 1,
+                    refs: [],
+                    body: encodeBody(RECORD_TYPES.KEY_REVOKE, { publicKey: b4a.alloc(32, 9), reason: null })
+                };
                 await expect(journal.write([bad], { immediate: true })).rejects.toThrow('not active');
                 expect(journal.pendingCount).toBe(1);
                 expect(core.length).toBe(1);
@@ -172,7 +177,11 @@ describe('journal writes', () => {
                     type: RECORD_TYPES.KEY_ADD,
                     ts: 1,
                     refs: [],
-                    body: encodeBody(RECORD_TYPES.KEY_ADD, { purpose, publicKey: b4a.alloc(32, i + 1), contextVersion: 1 })
+                    body: encodeBody(RECORD_TYPES.KEY_ADD, {
+                        purpose,
+                        publicKey: b4a.alloc(32, i + 1),
+                        contextVersion: 1
+                    })
                 }));
                 await journal.write(records, { immediate: true });
             });

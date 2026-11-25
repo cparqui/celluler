@@ -208,7 +208,9 @@ describe('multi-cell journals', () => {
 
         it('produces a valid, well-linked DAG', async () => {
             const { journals, syncLog } = await buildJournalFixture({ testnet, cells: 4, syncs: 8, seedOffset: 120 });
-            const byHash = new Map(journals.flatMap((j) => j.events.map((e) => [e.hash, { cell: j.cellId, event: e }])));
+            const byHash = new Map(
+                journals.flatMap((j) => j.events.map((e) => [e.hash, { cell: j.cellId, event: e }]))
+            );
 
             expect(syncLog).toHaveLength(8);
             expect(journals.reduce((sum, j) => sum + j.events.length, 0)).toBe(4 * 2 + 16);
@@ -245,7 +247,13 @@ describe('multi-cell journals', () => {
             await expect(buildJournalFixture({ testnet, cells: 1 })).rejects.toThrow('at least 2');
             await expect(buildJournalFixture({ testnet, syncs: -1 })).rejects.toThrow('non-negative');
             await expect(
-                buildJournalFixture({ testnet, cells: 2, syncs: 1, selectPartner: ({ creator }) => creator, seedOffset: 150 })
+                buildJournalFixture({
+                    testnet,
+                    cells: 2,
+                    syncs: 1,
+                    selectPartner: ({ creator }) => creator,
+                    seedOffset: 150
+                })
             ).rejects.toThrow('Invalid partner');
         });
 

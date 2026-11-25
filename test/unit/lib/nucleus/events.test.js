@@ -183,7 +183,10 @@ describe('record bodies', () => {
 
     it('rejects malformed and non-canonical bodies', () => {
         expect(() => decodeBody(RECORD_TYPES.KEY_ADD, b4a.from([200]))).toThrow('Malformed');
-        const padded = b4a.concat([encodeBody(RECORD_TYPES.GENESIS, { protocol: PROTOCOL, created: 1 }), b4a.from([0])]);
+        const padded = b4a.concat([
+            encodeBody(RECORD_TYPES.GENESIS, { protocol: PROTOCOL, created: 1 }),
+            b4a.from([0])
+        ]);
         expect(() => decodeBody(RECORD_TYPES.GENESIS, padded)).toThrow('not canonically encoded');
     });
 });
