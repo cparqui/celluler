@@ -41,10 +41,11 @@ cell:
         filename: cell-{date}.log
         eol: "\n"
         interval: 1000
-    # - type: Bunyan
+    # - type: Pino
     #   options:
-    #     bunyan:
-    #       name: ${CELL_NAME}
+    #     pino:
+    #       options:
+    #         name: ${CELL_NAME}
 
   metrics:
     reporter: Prometheus
