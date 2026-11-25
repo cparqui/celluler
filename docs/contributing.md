@@ -10,8 +10,8 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ### Prerequisites
 
-- Node.js 16+
-- npm or yarn
+- Node.js 22.18+ (see `engines` in `package.json`)
+- npm 11 (the release-age rule below relies on npm's `min-release-age` setting)
 - Git
 - Basic understanding of distributed systems
 - Familiarity with TypeScript
@@ -29,6 +29,12 @@ cd celluler
 npm install
 git checkout -b feature/your-feature-name
 ```
+
+### Dependencies
+
+- `.npmrc` sets `min-release-age=14`, so npm only installs versions published at least 14 days ago. When you add or raise a dependency, choose a version range whose floor is at least three weeks old.
+- No lockfile is committed (`package-lock.json` is ignored).
+- When `npm audit` reports a vulnerable transitive dependency that its parent hasn't updated yet, pin a patched version with a scoped entry in `overrides` in `package.json`, such as `"glob@>=9.0.0 <14.0.2": "14.0.4"`. Scope the key to the vulnerable range so other major versions in the tree are left alone. Remove the entry once the parent packages depend on a fixed version.
 
 ## Development Workflow
 
