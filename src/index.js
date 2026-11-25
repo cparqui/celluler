@@ -2,7 +2,6 @@
 
 import _ from 'lodash';
 import { ServiceBroker } from 'moleculer';
-import { withLogHooks } from './lib/logging.js';
 import NucleusService from './services/nucleus.service.js';
 import fs from 'fs';
 import { load as loadYaml } from 'js-yaml';
@@ -139,7 +138,7 @@ export function createMoleculerConfig(cellConfig, debug = false) {
         nodeID: cellConfig.id,
         namespace: cellConfig.namespace,
         transporter: cellConfig.transporter,
-        logger: withLogHooks(cellConfig.logger),
+        logger: cellConfig.logger,
         metrics: cellConfig.metrics,
         tracing: cellConfig.tracing,
         hotReload: cellConfig.hotReload,

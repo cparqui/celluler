@@ -33,9 +33,10 @@ describe('NucleusService logging', () => {
             config: { storage: 'memory', seed, dht: { bootstrap: testnet.bootstrap } }
         });
         for (const level of LEVELS) {
-            jest.spyOn(service.logger, level).mockImplementation((message, ...rest) => {
-                const fields = Object.assign({}, ...rest.filter((arg) => !(arg instanceof Error)));
-                logs.push({ level, message, fields });
+            // Pino style: an optional context object, then the message.
+            jest.spyOn(service.logger, level).mockImplementation((...args) => {
+                const fields = typeof args[0] === 'object' ? args.shift() : {};
+                logs.push({ level, message: args[0], fields });
             });
         }
         await broker.start();
@@ -113,7 +114,9 @@ describe('NucleusService logging', () => {
         expect(logged('error', 'Action failed')).toHaveLength(0);
 
         await expect(call('bind', { topic: 'chat', key: 'ff' })).rejects.toThrow('Discovery key mismatch');
-        expect(logged('error', 'Action failed')[0].fields).toEqual({ action: 'nucleus.bind' });
+        const [failed] = logged('error', 'Action failed');
+        expect(failed.fields.action).toBe('nucleus.bind');
+        expect(failed.fields.err.message).toContain('Discovery key mismatch');
     });
 
     it('logs shutdown at info', async () => {

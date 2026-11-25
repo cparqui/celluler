@@ -135,14 +135,15 @@ git checkout -b feature/your-feature-name
 
 ### 4. Logging
 
-Put the message first, then any structured fields or the error, and keep the message a fixed phrase with no values in it, so lines are easy to search:
+Use Pino's call style: an optional context object first, then the message. Keep the message a fixed phrase with no values in it, so lines are easy to search, and put errors under `err`:
 
 ```js
-this.logger.info('Nucleus started', { cellId, journalLength });
-this.logger.error('Failed to flush journal', err);
+this.logger.info({ cellId, journalLength }, 'Nucleus started');
+this.logger.error({ err }, 'Failed to flush journal');
+this.logger.debug('Corestore closed');
 ```
 
-This prints readably with the Console logger. With Pino, `src/lib/logging.js` moves the fields and error into Pino's structured output; Pino on its own drops every argument after the message.
+With the Pino logger, each line is one JSON object: the context becomes top-level fields, the message goes in `msg`, and `err` is serialized with its type, message and stack. Arguments after the message only fill `%s`-style placeholders in it (otherwise Pino drops them), so put values in the context object instead.
 
 Choose the level by how often it happens and who needs it:
 

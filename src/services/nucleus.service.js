@@ -274,9 +274,9 @@ export default class NucleusService extends BaseService {
     onActionError(ctx, err) {
         const action = ctx.action?.name;
         if (err instanceof MoleculerClientError) {
-            this.logger.debug('Action rejected', { action, type: err.type, code: err.code, reason: err.message });
+            this.logger.debug({ action, type: err.type, code: err.code, reason: err.message }, 'Action rejected');
         } else {
-            this.logger.error('Action failed', { action }, err);
+            this.logger.error({ action, err }, 'Action failed');
         }
         throw err;
     }
@@ -304,24 +304,24 @@ export default class NucleusService extends BaseService {
                 urgentPerMinute: this.settings.urgentPerMinute ?? DEFAULT_URGENT_PER_MINUTE,
                 onCommit: (commit) => this.#logCommit(commit)
             });
-            if (isNewCell) this.logger.info('Created a new cell journal', { cellId: this.cellId });
+            if (isNewCell) this.logger.info({ cellId: this.cellId }, 'Created a new cell journal');
             const attested = await this.#attestMissingKeys();
-            if (attested.length > 0) this.logger.info('Attested keys', { purposes: attested });
+            if (attested.length > 0) this.logger.info({ purposes: attested }, 'Attested keys');
             this.#assertKeysMatchSeed();
 
             this.swarm = this.#createSwarm();
             this.#joinTopic(core.discoveryKey);
 
-            this.logger.info('Nucleus started', {
+            this.logger.info({
                 cellId: this.cellId,
                 storage: this.settings.storage,
                 journalLength: core.length,
                 publicRecords: this.#journal.state.publicRecords,
                 dht: this.settings.dht?.bootstrap ? 'custom bootstrap' : 'public'
-            });
+            }, 'Nucleus started');
             await this.broker.emit('nucleus.started', { cellId: this.cellId });
         } catch (err) {
-            this.logger.error('Failed to start Nucleus', err);
+            this.logger.error({ err }, 'Failed to start Nucleus');
             await this.releaseResources();
             throw err;
         }
@@ -332,34 +332,34 @@ export default class NucleusService extends BaseService {
         const pendingRecords = this.#journal ? this.#journal.pendingCount : 0;
         if (this.#journal) {
             // Queued public records are in memory only until they are in an event.
-            await this.#journal.flush().catch((err) => this.logger.error('Failed to flush journal', err));
+            await this.#journal.flush().catch((err) => this.logger.error({ err }, 'Failed to flush journal'));
         }
         await this.broker.emit('nucleus.stopped', { cellId });
         await this.releaseResources();
         // A repeated stop (a second Ctrl-C) has nothing left to stop.
-        if (cellId) this.logger.info('Nucleus stopped', { cellId, flushedRecords: pendingRecords });
+        if (cellId) this.logger.info({ cellId, flushedRecords: pendingRecords }, 'Nucleus stopped');
     }
 
     async releaseResources() {
         if (this.swarm) {
-            await this.swarm.destroy().catch((err) => this.logger.error('Failed to destroy swarm', err));
+            await this.swarm.destroy().catch((err) => this.logger.error({ err }, 'Failed to destroy swarm'));
             this.swarm = null;
         }
         for (const [name, core] of Object.entries(this.cores ?? {})) {
-            await core.close().catch((err) => this.logger.error('Failed to close core', { name }, err));
+            await core.close().catch((err) => this.logger.error({ name, err }, 'Failed to close core'));
         }
         this.cores = {};
         for (const { core } of this.#peers.values()) {
-            await core.close().catch((err) => this.logger.error('Failed to close peer journal', err));
+            await core.close().catch((err) => this.logger.error({ err }, 'Failed to close peer journal'));
         }
         this.#peers.clear();
         this.#topics.clear();
         if (this.#journal) {
-            await this.#journal.core.close().catch((err) => this.logger.error('Failed to close journal', err));
+            await this.#journal.core.close().catch((err) => this.logger.error({ err }, 'Failed to close journal'));
             this.#journal = null;
         }
         if (this.store) {
-            await this.store.close().catch((err) => this.logger.error('Failed to close store', err));
+            await this.store.close().catch((err) => this.logger.error({ err }, 'Failed to close store'));
             this.store = null;
         }
         await removeEphemeral(this.#ephemeralDirectory);
@@ -395,7 +395,7 @@ export default class NucleusService extends BaseService {
         const { index, cell } = ctx.params;
         const core = this.#coreOf(cell);
         if (index >= core.length) throw reject(`Event ${index} does not exist`, 'EVENT_NOT_FOUND', 404);
-        this.logger.debug('Read journal event', { journal: cell ?? 'own', index });
+        this.logger.debug({ journal: cell ?? 'own', index }, 'Read journal event');
         return this.#readEvent(core, index);
     }
 
@@ -416,7 +416,7 @@ export default class NucleusService extends BaseService {
             events.push(event);
         }
         const nextIndex = index < end ? index : null;
-        this.logger.debug('Queried journal', {
+        this.logger.debug({
             journal: cell ?? 'own',
             type,
             hasOtherParent,
@@ -424,7 +424,7 @@ export default class NucleusService extends BaseService {
             to: end,
             matched: events.length,
             nextIndex
-        });
+        }, 'Queried journal');
         return { events, nextIndex };
     }
 
@@ -459,20 +459,20 @@ export default class NucleusService extends BaseService {
                 if (report.signature === false) throw new Error('invalid journal signature');
             }
             report.valid = true;
-            this.logger.debug('Verified journal', {
+            this.logger.debug({
                 journal: report.cell,
                 verifiedLength: report.verifiedLength,
                 complete: report.complete
-            });
+            }, 'Verified journal');
         } catch (err) {
             report.error = err.message;
             // A bad peer journal is the peer's problem; a bad own journal means local corruption.
             const own = b4a.equals(core.key, this.#journal.cell);
-            this.logger[own ? 'error' : 'warn']('Journal failed verification', {
+            this.logger[own ? 'error' : 'warn']({
                 journal: report.cell,
                 verifiedLength: report.verifiedLength,
                 reason: err.message
-            });
+            }, 'Journal failed verification');
         }
         return report;
     }
@@ -488,7 +488,7 @@ export default class NucleusService extends BaseService {
             throw reject(`Type ${type} is owned by ${existing.owner}`, 'TYPE_CONFLICT', 409);
         }
         this.#types.set(type, { type, owner, schema, receipt });
-        if (!existing) this.logger.info('Registered record type', { type, owner, receipt });
+        if (!existing) this.logger.info({ type, owner, receipt }, 'Registered record type');
         return { type, owner };
     }
 
@@ -531,12 +531,12 @@ export default class NucleusService extends BaseService {
             otherParent
         });
         const rateLimited = urgent && !immediate;
-        this.logger.debug(event ? 'Recorded and published' : 'Recorded; waiting for the next event', {
+        this.logger.debug({
             type,
             seq,
             rateLimited,
             pendingRecords: journal.pendingCount
-        });
+        }, event ? 'Recorded and published' : 'Recorded; waiting for the next event');
         return {
             seq,
             event: event && { index: event.index, hash: toHex(event.hash) },
@@ -551,12 +551,12 @@ export default class NucleusService extends BaseService {
         const otherParent = parseInput(() => parseRef(ctx.params.peerHead, 'peerHead'));
         const verified = await this.#checkPeerRef(otherParent);
         const { event } = await journal.write([], { immediate: true, otherParent });
-        this.logger.debug('Synced with peer', {
+        this.logger.debug({
             peer: toHex(otherParent.cell),
             peerIndex: otherParent.index,
             verified,
             index: event.index
-        });
+        }, 'Synced with peer');
         return { index: event.index, hash: toHex(event.hash), verified };
     }
 
@@ -595,7 +595,7 @@ export default class NucleusService extends BaseService {
             }
         ];
         const { event } = await journal.write(records, { immediate: true });
-        this.logger.info('Rotated key', { purpose, contextVersion, index: event.index, reason });
+        this.logger.info({ purpose, contextVersion, index: event.index, reason }, 'Rotated key');
         if (purpose === 'swarm') await this.#replaceSwarm();
         return {
             purpose,
@@ -618,16 +618,16 @@ export default class NucleusService extends BaseService {
         const started = Date.now();
         const peer = await this.#openPeer(key);
         const timedOut = (detail = '') => {
-            this.logger.warn('Replication timed out', {
+            this.logger.warn({
                 cell,
                 length: peer.core.length,
                 minLength,
                 timeout
-            });
+            }, 'Replication timed out');
             return reject(`Timed out replicating journal ${cell}${detail}`, 'REPLICATION_TIMEOUT', 504);
         };
         const invalid = (reason) => {
-            this.logger.warn('Rejected peer journal', { cell, reason });
+            this.logger.warn({ cell, reason }, 'Rejected peer journal');
             return reject(`Invalid journal ${cell}: ${reason}`, 'INVALID_JOURNAL');
         };
         const discovery = this.#joinTopic(peer.core.discoveryKey);
@@ -664,7 +664,7 @@ export default class NucleusService extends BaseService {
         } while (signature === null);
         if (!signature) throw invalid('invalid journal signature');
         peer.state = state;
-        this.logger.debug('Replicated peer journal', { cell, length: state.length, ms: Date.now() - started });
+        this.logger.debug({ cell, length: state.length, ms: Date.now() - started }, 'Replicated peer journal');
         return {
             cell,
             length: state.length,
@@ -732,7 +732,7 @@ export default class NucleusService extends BaseService {
         this.#joinTopic(core.discoveryKey);
         await this.swarm.flush();
         foundPeers();
-        this.logger.info('Bound topic', { topic, discoveryKey: toHex(core.discoveryKey) });
+        this.logger.info({ topic, discoveryKey: toHex(core.discoveryKey) }, 'Bound topic');
         return { success: true, topic, core: getCoreInfo(core) };
     }
 
@@ -802,13 +802,13 @@ export default class NucleusService extends BaseService {
         });
         swarm.on('connection', (conn) => {
             const peer = toHex(conn.remotePublicKey);
-            this.logger.debug('Peer connected', { peer, connections: swarm.connections.size });
-            conn.on('close', () => this.logger.debug('Peer disconnected', { peer }));
+            this.logger.debug({ peer, connections: swarm.connections.size }, 'Peer connected');
+            conn.on('close', () => this.logger.debug({ peer }, 'Peer disconnected'));
             // Connections drop routinely; replication retries on the next one.
-            conn.on('error', (err) => this.logger.debug('Peer connection error', { peer, reason: err.message }));
+            conn.on('error', (err) => this.logger.debug({ peer, reason: err.message }, 'Peer connection error'));
             if (this.store) this.store.replicate(conn);
         });
-        swarm.on('error', (err) => this.logger.error('Hyperswarm error', err));
+        swarm.on('error', (err) => this.logger.error({ err }, 'Hyperswarm error'));
         return swarm;
     }
 
@@ -820,7 +820,7 @@ export default class NucleusService extends BaseService {
         this.swarm = this.#createSwarm();
         topics.forEach((discoveryKey) => this.#joinTopic(discoveryKey));
         await previous.destroy();
-        this.logger.info('Restarted swarm with the rotated key', { topics: topics.length });
+        this.logger.info({ topics: topics.length }, 'Restarted swarm with the rotated key');
     }
 
     #joinTopic(discoveryKey) {
@@ -829,7 +829,7 @@ export default class NucleusService extends BaseService {
         if (known) return known.discovery;
         const discovery = this.swarm.join(discoveryKey);
         this.#topics.set(id, { discoveryKey, discovery });
-        this.logger.debug('Joined swarm topic', { discoveryKey: id });
+        this.logger.debug({ discoveryKey: id }, 'Joined swarm topic');
         return discovery;
     }
 
@@ -861,12 +861,12 @@ export default class NucleusService extends BaseService {
 
     /** Debug only: one line per appended event. Record bodies are never logged. */
     #logCommit({ index, hash, records, otherParent }) {
-        this.logger.debug('Appended journal event', {
+        this.logger.debug({
             index,
             hash: toHex(hash),
             records: records.map((record) => record.type),
             otherParent: otherParent ? `${toHex(otherParent.cell)}#${otherParent.index}` : null
-        });
+        }, 'Appended journal event');
     }
 
     #assertKeysMatchSeed() {
@@ -893,7 +893,7 @@ export default class NucleusService extends BaseService {
         const peer = this.#peers.get(cell);
         if (!peer) throw reject(`Journal ${cell} is not replicated`, 'JOURNAL_NOT_AVAILABLE', 404);
         peer.state = await advanceState(peer.state, peer.core).catch((err) => {
-            this.logger.warn('Rejected peer journal', { cell, reason: err.message });
+            this.logger.warn({ cell, reason: err.message }, 'Rejected peer journal');
             throw reject(`Invalid journal ${cell}: ${err.message}`, 'INVALID_JOURNAL');
         });
         return peer.state;
@@ -911,7 +911,7 @@ export default class NucleusService extends BaseService {
             const core = this.store.get({ key });
             await core.ready();
             this.#peers.set(id, { core, state: createJournalState(key) });
-            this.logger.info('Tracking peer journal', { cell: id });
+            this.logger.info({ cell: id }, 'Tracking peer journal');
         }
         return this.#peers.get(id);
     }
@@ -929,7 +929,7 @@ export default class NucleusService extends BaseService {
         const block = await peer.core.get(ref.index, { wait: false });
         if (!block) return false;
         if (!b4a.equals(hashEvent(ref.cell, ref.index, block), ref.hash)) {
-            this.logger.warn('Peer reference does not match its journal', { cell: toHex(ref.cell), index: ref.index });
+            this.logger.warn({ cell: toHex(ref.cell), index: ref.index }, 'Peer reference does not match its journal');
             throw reject(`Ref hash does not match event ${ref.index} of the peer journal`, 'REF_HASH_MISMATCH');
         }
         return true;
