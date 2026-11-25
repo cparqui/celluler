@@ -21,10 +21,8 @@ module.exports = {
     },
     coverageDirectory: 'coverage',
     coverageReporters: ['text', 'lcov', 'html'],
-    transform: {
-        '^.+\\.js$': 'babel-jest'
-    },
-    transformIgnorePatterns: [
-        'node_modules/(?!(moleculer|b4a|corestore|hypercore|hyperswarm)/)'
-    ]
+    // Node runs the ES modules directly (see the `test` scripts), so nothing is transformed
+    // and coverage comes from V8.
+    coverageProvider: 'v8',
+    transform: {}
 };

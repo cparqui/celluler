@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import b4a from 'b4a';
 import c from 'compact-encoding';
 import { JournalError } from '../../../../src/lib/nucleus/errors.js';

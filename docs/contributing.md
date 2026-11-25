@@ -164,10 +164,13 @@ npm run build
 ### Testing
 
 ```bash
-npm test              # Run all tests
-npm run test:unit     # Run unit tests
-npm run test:integration  # Run integration tests
+npm test                    # Run all tests and check the 80% coverage threshold
+npm test -- --coverage=false test/unit         # Run only the unit tests
+npm test -- --coverage=false test/integration  # Run only the integration tests
+npm run test:watch          # Re-run tests on change
 ```
+
+Jest runs the ES modules natively, without Babel, so it needs Node's `--experimental-vm-modules` flag. The `npm test` script passes it; running `npx jest` directly fails with "Must use import to load ES Module". In test files, import the `jest` object from `@jest/globals` (`describe`, `it` and `expect` are still globals).
 
 ### Linting
 

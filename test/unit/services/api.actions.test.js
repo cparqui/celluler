@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { ServiceBroker } from 'moleculer';
 import ApiService from '../../../src/services/api.service.js';
 import NucleusService from '../../../src/services/nucleus.service.js';
