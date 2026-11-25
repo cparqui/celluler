@@ -133,6 +133,28 @@ git checkout -b feature/your-feature-name
 - Include code examples
 - Document edge cases
 
+### 4. Logging
+
+Put the message first, then any structured fields or the error, and keep the message a fixed phrase with no values in it, so lines are easy to search:
+
+```js
+this.logger.info('Nucleus started', { cellId, journalLength });
+this.logger.error('Failed to flush journal', err);
+```
+
+This prints readably with the Console logger. With Pino, `src/lib/logging.js` moves the fields and error into Pino's structured output; Pino on its own drops every argument after the message.
+
+Choose the level by how often it happens and who needs it:
+
+| Level | Use for | Nucleus examples |
+|---|---|---|
+| `error` | Faults that need someone to look: unexpected exceptions, local corruption, failed cleanup | `Action failed`, `Failed to start Nucleus`, own journal failed verification |
+| `warn` | Something wrong that the cell survived, often caused by a peer | Rejected peer journal, replication timed out, peer reference mismatch, memory storage |
+| `info` | Startup, shutdown and rare state changes: a production log should read as a short story | Nucleus started/stopped, new cell journal, keys attested or rotated, record type registered, topic bound, new peer journal tracked |
+| `debug` | Per-operation detail for watching the system work: every journal append and read, peer connections, rejected input | `Appended journal event`, `Read journal event`, `Peer connected`, `Action rejected` |
+
+Never log the root seed, secret keys, record bodies, messages or ciphertext. Cell IDs, public keys, hashes and record types are fine.
+
 ## Project Structure
 
 ```
